@@ -10,7 +10,7 @@ Week 1
 
 ## Objective
 
-Establish the project architecture and development environment.
+Establish the project architecture and development environment, and implement the initial User Service slice.
 
 ## Completed
 
@@ -18,20 +18,43 @@ Establish the project architecture and development environment.
 - Repository initialized
 - AI coding guidelines created
 - Current phase documentation created
+- Spring Boot 4.0.7 User Service initialized
+- Java 25 configured
+- Maven build configured
+- MySQL configured
+- `user_db` database configured
+- Spring Boot → MySQL connectivity verified
+- Flyway database migration configured
+- User entity implemented
+- User repository implemented
+- User DTOs implemented
+- Request validation implemented
+- User service implemented
+- BCrypt password hashing implemented
+- Duplicate email/phone validation implemented
+- Global exception handling implemented
+- User registration API implemented
+- User retrieval API implemented
+- User API manually verified
+- User persistence verified
+- Tests implemented and verified
+- Maven compile/test/install verified
 
 ## Currently Working On
 
-- Spring Initializr setup
-- User Service initialization
-- Local development environment
+- Final Phase 1 cleanup
+- Reviewing generated project files
+- Updating project documentation
+- Creating a clean Git checkpoint
 
 ## Next
 
-- Configure User Service
-- Configure MySQL
-- Configure Docker Compose
-- Verify Spring Boot → MySQL connectivity
-- Verify Actuator health endpoint
+- Commit Phase 1 checkpoint
+- Begin Phase 2 — Authentication & Authorization
+- Introduce Spring Security
+- Implement login
+- Implement JWT authentication
+- Implement authorization and protected endpoints
 
 ## Do Not Implement Yet
 
@@ -41,6 +64,12 @@ Establish the project architecture and development environment.
 - Payment workflow
 - Delivery assignment
 - Distributed tracing
+- Prometheus
+- Grafana
+- OpenTelemetry
 - Advanced microservice patterns
+- Distributed transactions
+- Saga
+- Transactional Outbox
 
 These will be introduced in their respective phases.

@@ -27,6 +27,12 @@ Thumbs.db
 !.env.example
 
 # Local configuration
-application-local.yml
-application-local.yaml
 application-local.properties
+
+#auto generated files from AI tools
+EXECUTIVE_SUMMARY.md
+FILE_INVENTORY.md
+IMPLEMENTATION_SUMMARY.md
+COMMAND_SUMMARY.md
+COMMANDS.md
+services/user-service/README.md

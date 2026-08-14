@@ -2,7 +2,7 @@
 
 ## Java
 
-- Java 21
+- Java 25
 - Prefer clean, readable code
 - Follow SOLID where appropriate
 - Avoid unnecessary abstractions
@@ -10,7 +10,7 @@
 
 ## Spring
 
-- Spring Boot 3.x
+- Spring Boot 4.0.7
 - Use @RestController for REST APIs
 - Use DTOs for API contracts
 - Do not expose JPA entities directly
