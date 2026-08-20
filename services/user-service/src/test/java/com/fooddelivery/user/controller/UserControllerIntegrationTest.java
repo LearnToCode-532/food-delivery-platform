@@ -7,13 +7,16 @@ import com.fooddelivery.user.dto.request.CreateUserRequest;
 import com.fooddelivery.user.dto.response.UserResponse;
 import com.fooddelivery.user.exception.UserAlreadyExistsException;
 import com.fooddelivery.user.mapper.UserMapper;
+import com.fooddelivery.user.security.JwtService;
 
 import tools.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -30,7 +33,8 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(UserController.class)
+@SpringBootTest
+@AutoConfigureMockMvc
 class UserControllerIntegrationTest {
     
     @Autowired
@@ -44,6 +48,9 @@ class UserControllerIntegrationTest {
     
     @MockitoBean
     private UserMapper userMapper;
+
+    @MockitoBean
+    JwtService jwtService;
     
     private CreateUserRequest createUserRequest;
     private User user;
@@ -188,9 +195,14 @@ class UserControllerIntegrationTest {
         // Arrange
         when(userService.getUserById(1L)).thenReturn(Optional.of(user));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
+        when(jwtService.validateToken("test-token")).thenReturn(true);
+        when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
         
         // Act & Assert
-        mockMvc.perform(get("/api/v1/users/1")
+        mockMvc.perform(get("/api/v1/users/1").header(
+                    HttpHeaders.AUTHORIZATION,
+                    "Bearer test-token"
+                )
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1L))
@@ -210,9 +222,14 @@ class UserControllerIntegrationTest {
     void testGetUserNotFound() throws Exception {
         // Arrange
         when(userService.getUserById(999L)).thenReturn(Optional.empty());
+        when(jwtService.validateToken("test-token")).thenReturn(true);
+        when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
         
         // Act & Assert
-        mockMvc.perform(get("/api/v1/users/999")
+        mockMvc.perform(get("/api/v1/users/999").header(
+                    HttpHeaders.AUTHORIZATION,
+                    "Bearer test-token"
+                )
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
@@ -249,9 +266,14 @@ class UserControllerIntegrationTest {
         // Arrange
         when(userService.getUserById(1L)).thenReturn(Optional.of(user));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
+        when(jwtService.validateToken("test-token")).thenReturn(true);
+        when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
         
         // Act
-        MvcResult result = mockMvc.perform(get("/api/v1/users/1")
+        MvcResult result = mockMvc.perform(get("/api/v1/users/1").header(
+                    HttpHeaders.AUTHORIZATION,
+                    "Bearer test-token"
+                )
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andReturn();
