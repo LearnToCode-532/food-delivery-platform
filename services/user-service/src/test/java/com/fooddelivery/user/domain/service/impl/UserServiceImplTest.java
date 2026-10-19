@@ -4,7 +4,10 @@ import com.fooddelivery.user.domain.entity.User;
 import com.fooddelivery.user.domain.enums.UserStatus;
 import com.fooddelivery.user.domain.repository.UserRepository;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
+import com.fooddelivery.user.dto.response.UserResponse;
 import com.fooddelivery.user.exception.UserAlreadyExistsException;
+import com.fooddelivery.user.mapper.UserMapper;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +33,9 @@ class UserServiceImplTest {
     
     @InjectMocks
     private UserServiceImpl userService;
+
+    @Mock
+    private UserMapper userMapper;
     
     private CreateUserRequest createUserRequest;
     
@@ -209,6 +215,15 @@ class UserServiceImplTest {
     @Test
     void testGetUserById() {
         // Arrange
+        UserResponse userResponse = UserResponse.builder()
+        .id(1L)
+        .email("john@example.com")
+        .firstName("John")
+        .lastName("Doe")
+        .phoneNumber("9876543210")
+        .status(UserStatus.ACTIVE)
+        .build();
+
         User user = User.builder()
                 .id(1L)
                 .email("john@example.com")
@@ -220,9 +235,10 @@ class UserServiceImplTest {
                 .build();
         
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userMapper.toResponse(user)).thenReturn(userResponse);
         
         // Act
-        Optional<User> result = userService.getUserById(1L);
+        Optional<UserResponse> result = userService.getUserById(1L);
         
         // Assert
         assertTrue(result.isPresent());
@@ -238,7 +254,7 @@ class UserServiceImplTest {
         when(userRepository.findById(999L)).thenReturn(Optional.empty());
         
         // Act
-        Optional<User> result = userService.getUserById(999L);
+        Optional<UserResponse> result = userService.getUserById(999L);
         
         // Assert
         assertFalse(result.isPresent());

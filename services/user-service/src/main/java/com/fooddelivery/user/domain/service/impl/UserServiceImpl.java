@@ -5,9 +5,16 @@ import com.fooddelivery.user.domain.enums.UserStatus;
 import com.fooddelivery.user.domain.repository.UserRepository;
 import com.fooddelivery.user.domain.service.UserService;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
+import com.fooddelivery.user.dto.request.UpdateUserRequest;
+import com.fooddelivery.user.dto.response.UserResponse;
 import com.fooddelivery.user.exception.UserAlreadyExistsException;
+import com.fooddelivery.user.exception.UserNotFoundException;
+import com.fooddelivery.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +27,7 @@ import java.util.Optional;
 @Slf4j
 public class UserServiceImpl implements UserService {
     
+    private final UserMapper userMapper;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     
@@ -63,9 +71,10 @@ public class UserServiceImpl implements UserService {
     }
     
     @Override
-    public Optional<User> getUserById(Long userId) {
-        log.debug("Fetching user by ID: {}", userId);
-        return userRepository.findById(userId);
+    @Cacheable(value = "users", key = "#userId")
+    public Optional<UserResponse> getUserById(Long userId) {
+        log.info("Fetching user by ID: {}", userId);
+        return userRepository.findById(userId).map(userMapper::toResponse);
     }
     
     @Override
@@ -97,5 +106,39 @@ public class UserServiceImpl implements UserService {
             return null;
         }
         return email.trim().toLowerCase();
+    }
+
+    @Override
+    @CacheEvict(value = "users", key = "#userId")
+    public User updateUser(Long userId, UpdateUserRequest request) {
+
+        log.info("Updating user with ID: {}", userId);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> UserNotFoundException.withId(userId));
+
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
+        user.setPhoneNumber(request.getPhoneNumber());
+
+        User updatedUser = userRepository.save(user);
+
+        log.info("User updated successfully with ID: {}", userId);
+
+        return updatedUser;
+    }
+
+    @Override
+    @CacheEvict(value = "users", key = "#userId")
+    public void deleteUser(Long userId) {
+
+        log.info("Deleting user with ID: {}", userId);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> UserNotFoundException.withId(userId));
+
+        userRepository.delete(user);
+
+        log.info("User deleted successfully with ID: {}", userId);
     }
 }

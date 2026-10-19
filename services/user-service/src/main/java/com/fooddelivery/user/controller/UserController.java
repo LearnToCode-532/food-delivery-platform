@@ -3,6 +3,7 @@ package com.fooddelivery.user.controller;
 import com.fooddelivery.user.domain.entity.User;
 import com.fooddelivery.user.domain.service.UserService;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
+import com.fooddelivery.user.dto.request.UpdateUserRequest;
 import com.fooddelivery.user.dto.response.UserResponse;
 import com.fooddelivery.user.exception.UserNotFoundException;
 import com.fooddelivery.user.mapper.UserMapper;
@@ -51,10 +52,30 @@ public class UserController {
         
         log.info("GET /api/v1/users/{} - Fetching user", userId);
         
-        User user = userService.getUserById(userId)
+        UserResponse response = userService.getUserById(userId)
                 .orElseThrow(() -> UserNotFoundException.withId(userId));
-        
-        UserResponse response = userMapper.toResponse(user);
+
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/{userId}")
+    public ResponseEntity<UserResponse> updateUser(@PathVariable Long userId, @Valid @RequestBody UpdateUserRequest request) {
+
+        log.info("PUT /api/v1/users/{} - Updating user", userId);
+
+        User updatedUser = userService.updateUser(userId, request);
+        UserResponse response = userMapper.toResponse(updatedUser);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @DeleteMapping("/{userId}")
+    public ResponseEntity<Void> deleteUser(@PathVariable Long userId) {
+
+        log.info("DELETE /api/v1/users/{} - Deleting user", userId);
+
+        userService.deleteUser(userId);
+
+        return ResponseEntity.noContent().build();
     }
 }

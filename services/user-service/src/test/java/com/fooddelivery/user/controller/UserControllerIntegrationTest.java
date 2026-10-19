@@ -193,7 +193,7 @@ class UserControllerIntegrationTest {
     @Test
     void testGetUserSuccess() throws Exception {
         // Arrange
-        when(userService.getUserById(1L)).thenReturn(Optional.of(user));
+        when(userService.getUserById(1L)).thenReturn(Optional.of(userResponse));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
         when(jwtService.validateToken("test-token")).thenReturn(true);
         when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
@@ -215,7 +215,6 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$.password").doesNotExist());
         
         verify(userService, times(1)).getUserById(1L);
-        verify(userMapper, times(1)).toResponse(user);
     }
     
     @Test
@@ -264,7 +263,7 @@ class UserControllerIntegrationTest {
     @Test
     void testGetUserPasswordNotInResponse() throws Exception {
         // Arrange
-        when(userService.getUserById(1L)).thenReturn(Optional.of(user));
+        when(userService.getUserById(1L)).thenReturn(Optional.of(userResponse));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
         when(jwtService.validateToken("test-token")).thenReturn(true);
         when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());

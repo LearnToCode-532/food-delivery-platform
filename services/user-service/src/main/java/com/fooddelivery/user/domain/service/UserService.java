@@ -2,6 +2,10 @@ package com.fooddelivery.user.domain.service;
 
 import com.fooddelivery.user.domain.entity.User;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
+import com.fooddelivery.user.dto.request.UpdateUserRequest;
+import com.fooddelivery.user.dto.response.UserResponse;
+import com.fooddelivery.user.exception.UserAlreadyExistsException;
+import com.fooddelivery.user.exception.UserNotFoundException;
 
 import java.util.Optional;
 
@@ -23,9 +27,9 @@ public interface UserService {
      * Retrieve user by ID.
      * 
      * @param userId the user ID
-     * @return the user if found
+     * @return the userResponse if found
      */
-    Optional<User> getUserById(Long userId);
+    Optional<UserResponse> getUserById(Long userId);
     
     /**
      * Retrieve user by normalized email.
@@ -50,4 +54,22 @@ public interface UserService {
      * @return true if phone number exists, false otherwise
      */
     boolean phoneNumberExists(String phoneNumber);
+
+    /**
+     * Update an existing user.
+     * 
+     * @param userId the ID of the user to update
+     * @param request the update request containing new details
+     * @return the updated user entity
+     * @throws UserNotFoundException if user does not exist
+     */
+    User updateUser(Long userId, UpdateUserRequest request);
+
+    /**
+     * Delete a user by ID.
+     *
+     * @param userId the user ID
+     * @throws UserNotFoundException if user does not exist
+     */
+    void deleteUser(Long userId);
 }
