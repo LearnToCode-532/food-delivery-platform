@@ -7,6 +7,7 @@ import com.fooddelivery.user.domain.service.UserService;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
 import com.fooddelivery.user.dto.request.UpdateUserRequest;
 import com.fooddelivery.user.dto.response.UserResponse;
+import com.fooddelivery.user.event.UserRegisteredEventPublisher;
 import com.fooddelivery.user.exception.UserAlreadyExistsException;
 import com.fooddelivery.user.exception.UserNotFoundException;
 import com.fooddelivery.user.mapper.UserMapper;
@@ -30,6 +31,7 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final UserRegisteredEventPublisher userRegisteredEventPublisher;
     
     @Override
     public User createUser(CreateUserRequest createUserRequest) {
@@ -65,6 +67,7 @@ public class UserServiceImpl implements UserService {
         
         // Save to database
         User savedUser = userRepository.save(user);
+        userRegisteredEventPublisher.publishAfterCommit(savedUser.getId());
         log.info("User created successfully with ID: {}", savedUser.getId());
         
         return savedUser;

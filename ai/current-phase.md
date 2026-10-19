@@ -2,18 +2,17 @@
 
 ## Phase
 
-**Phase 3 — Redis Caching, Availability & GEO Location Tracking**
+**Phase 5 — User Profile Management**
 
 ## Status
 
 - Phase 1 — Architecture & User Service: **COMPLETE**
 - Phase 2 — Authentication & Authorization: **COMPLETE**
-- Phase 3 — Redis Caching, Availability & GEO: **IMPLEMENTATION COMPLETE**
-- Phase 4 — Kafka Events: **NEXT**
+- Phase 3 — Redis Caching, Availability & GEO: **IMPLEMENTATION COMPLETE; DOCUMENTATION REVIEWED; GIT CHECKPOINT DEFERRED**
+- Phase 4 — Kafka Events: **INITIAL REGISTRATION FLOW IMPLEMENTED AND MANUALLY VERIFIED; FULL DATABASE REGRESSION DEFERRED**
+- Phase 5 — User Profile Management: **IN PROGRESS; UPDATE/DELETE SERVICE TESTS ADDED**
 
-Both User Service and Delivery Service test suites are passing.
-
-Before starting Phase 4, finish documenting Phase 3 decisions and create a clean Git checkpoint.
+The Phase 3 documentation review is complete. No Git checkpoint was created because committing is outside the current task.
 
 ## Completed
 
@@ -161,50 +160,106 @@ These endpoints form the foundation for the future delivery assignment workflow.
 
 ### Phase 3 Verification
 
-Latest reported status:
+- Redis caching, availability tracking, and GEO implementation are complete.
+- Historical Surefire reports recorded 67 User Service tests and 45 Delivery Service tests with no reported failures, but the Delivery report used `delivery_db`. Because Delivery integration tests delete rows, that run is not safe full-regression evidence.
+- No Phase 3 database-backed regression suite was run during the current continuation. The Phase 3 implementation status is retained, but this documentation does not treat the historical Delivery run as safe regression verification.
+- No new Phase 3 manual verification was performed as part of this continuation.
 
-- User Service test suite: **PASS**
-- Delivery Service test suite: **PASS**
-- Redis caching implementation: complete
-- Redis availability tracking implementation: complete
-- Redis GEO implementation: complete
+### Phase 4 — Kafka User Registration Event
 
-Both services' test suites have passed after resolving the compilation and GEO-related test issues.
+- Spring Boot 4.0.7-managed Kafka starter added to the User Service and Notification Service
+- Spring Boot JSON starter added to the Notification Service for Jackson 3 Kafka JSON serialization
+- Both services accept `KAFKA_BOOTSTRAP_SERVERS` as an override; the current local properties use the WSL2-advertised broker address as the fallback
+- `POST /api/v1/users` schedules a `UserRegistered` event after the registration transaction commits
+- Event fields: `eventId` (`UUID`), `userId` (`Long`), and `occurredAt` (`Instant`)
+- Producer sends asynchronously to `user.events` with the event ID as the Kafka key
+- Producer metadata/buffer waits are bounded to five seconds; the request does not wait for the send future
+- Notification Service is a separate Maven project and consumes the event using group `notification-service`
+- Consumer contract is an independent record with the same JSON fields; it does not depend on User Service classes or its database
+- JSON type headers are disabled; consumer deserialization uses an explicit target type and trusts only its event package
+- Consumer uses Spring Kafka's default exception classification. Retryable listener failures are attempted three times total (initial delivery plus two retries at one-second intervals), then topic/partition/offset are logged and the record is recovered; no dead-letter topic is configured
+- Spring Kafka's default fatal exceptions, including `DeserializationException`, are recovered without retries. The default error handler acknowledges handled records, allowing their offsets to advance
+- Consumer processing is not idempotency-tracked. A crash before an offset is committed can cause a record to be delivered and processed again
+- No email/SMS provider, transactional outbox, or exactly-once guarantee is implemented
+
+#### Phase 4 Verification — Manual
+
+- **Verified manually on October 19, 2026:** a user was registered through the User Service, the User Service published a `UserRegistered` event, and the Notification Service consumed it.
+- Confirmed consumer log: `Received UserRegistered event 8ccdc007-3771-4423-a5cc-82e95112a988 for user 110`
+- Kafka 4.0.2 was running locally in WSL2 in KRaft mode.
+- **Local networking workaround:** Windows `localhost:9092` resolved to IPv6 while the Notification Service attempted IPv4. The working local setup used the WSL2 IP for Kafka's advertised PLAINTEXT listener and as the Spring Kafka bootstrap server. Do not rely on `localhost` across this Windows/WSL2 boundary in this setup.
+- The WSL2 IP can change after a WSL restart. Re-discover the current WSL2 IP and update the local broker advertised listener and `KAFKA_BOOTSTRAP_SERVERS` for both services; do not copy a current IP into shared documentation.
+
+#### Phase 4 Verification — Automated
+
+- User Service focused registration and producer tests: **15 passed, 0 failures, 0 errors, 0 skipped**. Command, from `services/user-service`: `.\mvnw.cmd clean '-Dtest=UserServiceImplTest,UserRegisteredEventPublisherTest' test`
+- Notification Service suite: **7 passed**. Command, from `services/notification-service`: `..\user-service\mvnw.cmd test`
+- The focused tests cover scheduling only after successful persistence, after-commit publication, rollback suppression, the three-field event contract, synchronous and asynchronous producer send failures, valid/invalid consumer events, JSON serialization/deserialization, malformed JSON capture, retry count, and recovery logging.
+- The focused consumer retry test verifies three total attempts for an ordinary retryable processing exception (initial delivery plus two retries), with two one-second backoffs.
+- The focused deserialization recovery test verifies that a `DeserializationException` is treated by Spring Kafka's default fatal classification: recovery occurs without retries and the handled record is eligible for offset commit.
+- On October 19, 2026, the first focused User Service invocation without `clean` failed with six class-format/verifier errors in pre-existing `target` bytecode. The clean rebuild above then passed all 15 tests. The failed attempt did not start Spring contexts or access external infrastructure.
+
+#### Test Isolation Guardrails and Current Verification
+
+- User and Delivery Service Maven Surefire configurations pin test datasource URLs to `food_delivery_user_test` and `food_delivery_delivery_test`, respectively. Both receive credentials only from `FDP_TEST_DB_USERNAME` and `FDP_TEST_DB_PASSWORD`; no credential values are stored in the repository.
+- User Service tests are pinned to Redis DB 15 and a loopback Kafka address on port 1, so test-triggered registration events cannot reach the configured shared broker. Delivery Service tests are pinned to Redis DB 15.
+- These are test-runner properties only. The runtime datasource defaults and service configuration have not been changed for test isolation.
+- User's Flyway migration and Hibernate `ddl-auto=update` can modify the selected User schema at context startup. Delivery's Flyway migration can modify its selected schema; Hibernate uses `ddl-auto=validate`. The Surefire datasource pins ensure the schemas selected by ordinary Maven test runs are the dedicated test schemas, not `user_db` or `delivery_db`.
+- Delivery integration tests delete repository rows and both services' Redis tests clear keys. Both services' integration suites therefore still require Redis DB 15 to be confirmed reserved for testing immediately before execution. An empty Redis DB alone does not establish exclusive isolation.
+- Safe checks run on October 19, 2026:
+  - User Service focused tests: **15 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS** (command above).
+  - Notification Service: **7 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS** (`..\user-service\mvnw.cmd test`, from `services/notification-service`).
+  - Delivery Service: `.\mvnw.cmd -DskipTests test-compile` completed with **BUILD SUCCESS** and compiled all five test source files; no tests were executed.
+- In the October 19, 2026 continuation, the User focused tests were rerun after a clean build: **15 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**. Command, from `services/user-service`: `.\mvnw.cmd clean '-Dtest=UserServiceImplTest,UserRegisteredEventPublisherTest' test`.
+- In the same continuation, Notification tests were rerun: **7 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**. Command, from `services/notification-service`: `..\user-service\mvnw.cmd test`.
+- Delivery test compilation was rerun with `.\mvnw.cmd -DskipTests test-compile` from `services/delivery-service`: **BUILD SUCCESS**; all five test sources were already up to date. No Delivery tests were executed.
+- By user decision, no full database-backed User or Delivery suite was run in this continuation. Their full regression status remains unverified; the Delivery report shown below used `delivery_db` and is not safe regression evidence.
+
+#### Latest Full-Service Surefire Reports — October 19, 2026
+
+- User Service: **67 tests, 0 failures, 0 errors, 0 skipped**. Surefire reports show the integration-test datasource was `food_delivery_user_test`.
+- Delivery Service: **45 tests, 0 failures, 0 errors, 0 skipped**. Surefire reports show the integration-test datasource was `delivery_db`, not an isolated test schema. Since integration tests call `repository.deleteAll()`, this result is not accepted as a safe regression verification and may have affected development data.
+- Notification Service: **7 tests, 0 failures, 0 errors, 0 skipped**.
+- The Surefire report files verify the counts and database URL logged during the runs, but do not preserve the exact Maven command lines. Do not infer or record an invocation as exact without its console transcript.
+- These reports predate this documentation checkpoint. No full suites were run as part of this checkpoint.
+- No broker-backed automated integration test was run; the end-to-end Kafka path above was verified manually.
+
+#### Full Database Regression — Deferred
+
+- User-requested scope for this continuation excludes further database/Redis isolation setup and full database-backed regression runs. These tests remain unverified, not failed or passed.
+- If a future regression run is requested, use the Surefire test-only datasource pins and configure the restricted test account via `FDP_TEST_DB_USERNAME` and `FDP_TEST_DB_PASSWORD`. Confirm Redis DB 15 is reserved exclusively for the tests before execution; do not flush it to make it empty.
+- No database-backed tests were run in this continuation, so `user_db` and `delivery_db` were not selected by a test process.
 
 ## Currently Working On
 
-### Phase 3 — Finalization
+### Phase 5 — User Profile Management
 
-Before beginning Phase 4:
+- [x] Existing profile update and delete operations retained: `PUT /api/v1/users/{userId}` and `DELETE /api/v1/users/{userId}`
+- [x] Add focused service unit tests for successful profile update, preservation of account fields, and missing-user behavior for update and delete
+- [ ] Define any additional Phase 5 acceptance criteria before expanding beyond the documented update/delete scope
 
-- [ ] Review Redis cache, availability, and GEO design decisions
-- [ ] Verify the APIs manually against a running Redis instance
-- [ ] Document consistency limitations and failure scenarios
-- [ ] Review the complete test results
-- [ ] Create a clean Git checkpoint
+The implementation's current delete operation physically removes the user row. The roadmap does not specify soft deletion, profile ownership rules, or duplicate-phone behavior during updates; these semantics should be agreed before changing them.
 
-Do not repeat completed implementation work unless verification reveals a defect.
+#### Phase 5 Verification — Automated
 
-## Next
+- User Service profile service tests, command from `services/user-service`: `.\mvnw.cmd '-Dtest=UserServiceImplTest' test`
+- Result on October 19, 2026: **14 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**. These are Mockito unit tests and do not connect to MySQL, Redis, or Kafka.
+- Full User and Delivery Service database-backed suites remain intentionally deferred. This focused result is not full-suite regression evidence.
 
-### Phase 4 — Kafka Events
+## Phase 4 Follow-up — Deferred
 
-Introduce asynchronous communication between services and understand event-driven architecture.
+The initial registration workflow is implemented and manually verified. Full User and Delivery database-backed regression was explicitly deferred; no full suite is claimed as passed. Optional reliability follow-ups are:
 
-Planned objectives:
+- Add broker-backed integration tests when a safe broker test environment is available
+- Study partitions, offsets, consumer groups, duplicate delivery, idempotent processing, and consumer restart behavior
+- Consider a transactional outbox and operational dead-letter handling in a later reliability milestone
 
-- Understand synchronous versus asynchronous communication
-- Understand Kafka topics, partitions, offsets, and consumer groups
-- Configure Kafka locally
-- Introduce event producers and consumers
-- Define event naming and payload conventions
-- Implement an initial event-driven workflow
-- Handle consumer failures and retries
-- Understand duplicate delivery and idempotent processing
-- Add integration tests for event-driven behavior
-- Document delivery guarantees and consistency trade-offs
+These follow-ups are not prerequisites to the documented Phase 5 update/delete scope.
 
-The first Kafka workflow should be selected based on the current service architecture rather than introducing events without a clear use case.
+## Phase 3 Documentation and Git Checkpoint
+
+- [x] Review and reconcile Phase 3 implementation and verification notes with the available test evidence
+- [ ] Create a Git checkpoint — deferred; no commit was created
 
 ## Future Delivery Assignment Workflow
 
@@ -250,6 +305,13 @@ Do not implement the complete assignment workflow during Phase 3.
 - Evaluate transactional outbox and event-driven synchronization
 - Define location expiration and stale-location policies
 
+### Kafka and Event Reliability
+
+- Add a transactional outbox so committed user registrations can be relayed to Kafka after process restarts
+- Define idempotent consumer behavior before adding notification side effects
+- Evaluate bounded retry and dead-letter topic policies for operational recovery
+- Add broker-backed integration tests and document duplicate/redelivery handling
+
 These improvements should be addressed when relevant to the current phase, not prematurely.
 
 ## Security Configuration
@@ -281,7 +343,7 @@ Unless explicitly introduced by the current phase, defer:
 - Transactional outbox implementation
 - Production-scale distributed transactions
 
-Kafka is planned for Phase 4 and should not be introduced retroactively into the completed Redis implementation.
+The initial Kafka registration event flow is implemented in Phase 4. Reliability follow-ups remain deferred and should be handled in an appropriate later milestone.
 
 ## Phase Order
 
@@ -301,17 +363,19 @@ Redis Caching, Availability & GEO
         ↓
 IMPLEMENTATION COMPLETE
         ↓
-Documentation, verification & Git checkpoint
+Documentation reviewed
+Git checkpoint deferred
 
 Phase 4
 Kafka Events
         ↓
-NEXT
+Initial flow implemented
+Full DB regression deferred
 
 Phase 5
 User Profile Management
         ↓
-PLANNED
+IN PROGRESS
 
 Phase 6
 Advanced Features

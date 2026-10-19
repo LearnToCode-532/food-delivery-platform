@@ -46,6 +46,12 @@ Kafka is used for:
 - Delivery events
 - Notifications
 
+Initial event flow:
+- The User Service publishes a `UserRegistered` event to `user.events` after the user database transaction commits.
+- The Notification Service consumes `user.events` independently and does not access the User Service database.
+- The event contract contains only `eventId`, `userId`, and `occurredAt`.
+- The initial producer is asynchronous and does not use a transactional outbox; database commit and Kafka publication are not atomic.
+
 ## Security
 
 JWT-based authentication.

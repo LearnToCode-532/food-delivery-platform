@@ -4,8 +4,11 @@ import com.fooddelivery.user.domain.entity.User;
 import com.fooddelivery.user.domain.enums.UserStatus;
 import com.fooddelivery.user.domain.repository.UserRepository;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
+import com.fooddelivery.user.dto.request.UpdateUserRequest;
 import com.fooddelivery.user.dto.response.UserResponse;
+import com.fooddelivery.user.event.UserRegisteredEventPublisher;
 import com.fooddelivery.user.exception.UserAlreadyExistsException;
+import com.fooddelivery.user.exception.UserNotFoundException;
 import com.fooddelivery.user.mapper.UserMapper;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +39,9 @@ class UserServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private UserRegisteredEventPublisher userRegisteredEventPublisher;
     
     private CreateUserRequest createUserRequest;
     
@@ -86,6 +92,7 @@ class UserServiceImplTest {
         verify(userRepository, times(1)).existsByPhoneNumber("9876543210");
         verify(passwordEncoder, times(1)).encode("password123");
         verify(userRepository, times(1)).save(any(User.class));
+        verify(userRegisteredEventPublisher).publishAfterCommit(1L);
     }
     
     @Test
@@ -134,6 +141,7 @@ class UserServiceImplTest {
         verify(userRepository, times(1)).existsByEmail("john@example.com");
         verify(userRepository, never()).existsByPhoneNumber(anyString());
         verify(userRepository, never()).save(any(User.class));
+        verify(userRegisteredEventPublisher, never()).publishAfterCommit(anyLong());
     }
     
     @Test
@@ -153,6 +161,19 @@ class UserServiceImplTest {
         verify(userRepository, times(1)).existsByEmail("john@example.com");
         verify(userRepository, times(1)).existsByPhoneNumber("9876543210");
         verify(userRepository, never()).save(any(User.class));
+        verify(userRegisteredEventPublisher, never()).publishAfterCommit(anyLong());
+    }
+
+    @Test
+    void testFailedPersistenceDoesNotScheduleRegistrationEvent() {
+        when(userRepository.existsByEmail("john@example.com")).thenReturn(false);
+        when(userRepository.existsByPhoneNumber("9876543210")).thenReturn(false);
+        when(passwordEncoder.encode("password123")).thenReturn("hashedPassword123");
+        when(userRepository.save(any(User.class))).thenThrow(new IllegalStateException("database unavailable"));
+
+        assertThrows(IllegalStateException.class, () -> userService.createUser(createUserRequest));
+
+        verify(userRegisteredEventPublisher, never()).publishAfterCommit(anyLong());
     }
     
     @Test
@@ -282,6 +303,73 @@ class UserServiceImplTest {
         
         // Assert
         assertTrue(result.isPresent());
+        assertTrue(result.isPresent());
         assertEquals("john@example.com", result.get().getEmail());
+    }
+    @Test
+    void testUpdateUserUpdatesProfileFieldsWithoutChangingAccountFields() {
+        User user = User.builder()
+                .id(1L)
+                .email("john@example.com")
+                .firstName("John")
+                .lastName("Doe")
+                .phoneNumber("9876543210")
+                .passwordHash("existing-hash")
+                .status(UserStatus.ACTIVE)
+                .build();
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("1234567890");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+
+        User result = userService.updateUser(1L, request);
+
+        assertSame(user, result);
+        assertEquals("Jane", result.getFirstName());
+        assertEquals("Smith", result.getLastName());
+        assertEquals("1234567890", result.getPhoneNumber());
+        assertEquals("john@example.com", result.getEmail());
+        assertEquals("existing-hash", result.getPasswordHash());
+        assertEquals(UserStatus.ACTIVE, result.getStatus());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void testUpdateUserNotFound() {
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+        UpdateUserRequest request = new UpdateUserRequest();
+
+        assertThrows(UserNotFoundException.class, () -> userService.updateUser(999L, request));
+
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void testDeleteUserRemovesExistingUser() {
+        User user = User.builder()
+                .id(1L)
+                .email("john@example.com")
+                .firstName("John")
+                .lastName("Doe")
+                .phoneNumber("9876543210")
+                .passwordHash("existing-hash")
+                .status(UserStatus.ACTIVE)
+                .build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUser(1L);
+
+        verify(userRepository).delete(user);
+    }
+
+    @Test
+    void testDeleteUserNotFound() {
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThrows(UserNotFoundException.class, () -> userService.deleteUser(999L));
+
+        verify(userRepository, never()).delete(any(User.class));
     }
 }
