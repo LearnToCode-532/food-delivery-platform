@@ -14,12 +14,16 @@ import com.fooddelivery.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Locale;
 import java.util.Optional;
 
 @Service
@@ -35,20 +39,20 @@ public class UserServiceImpl implements UserService {
     
     @Override
     public User createUser(CreateUserRequest createUserRequest) {
-        log.info("Creating user with email: {}", createUserRequest.getEmail());
+        log.info("Creating user");
         
         // Normalize email: trim and lowercase
         String normalizedEmail = normalizeEmail(createUserRequest.getEmail());
         
         // Check for duplicate email
         if (userRepository.existsByEmail(normalizedEmail)) {
-            log.warn("User creation failed - email already exists: {}", normalizedEmail);
+            log.warn("User creation failed - email already exists");
             throw UserAlreadyExistsException.withEmail(normalizedEmail);
         }
         
         // Check for duplicate phone number
         if (userRepository.existsByPhoneNumber(createUserRequest.getPhoneNumber())) {
-            log.warn("User creation failed - phone number already exists: {}", createUserRequest.getPhoneNumber());
+            log.warn("User creation failed - phone number already exists");
             throw UserAlreadyExistsException.withPhoneNumber(createUserRequest.getPhoneNumber());
         }
         
@@ -77,14 +81,15 @@ public class UserServiceImpl implements UserService {
     @Cacheable(value = "users", key = "#userId")
     public Optional<UserResponse> getUserById(Long userId) {
         log.info("Fetching user by ID: {}", userId);
-        return userRepository.findById(userId).map(userMapper::toResponse);
+        return userRepository.findByIdAndStatusNot(userId, UserStatus.DELETED)
+                .map(userMapper::toResponse);
     }
     
     @Override
     public Optional<User> getUserByEmail(String email) {
         String normalizedEmail = normalizeEmail(email);
         log.debug("Fetching user by email: {}", normalizedEmail);
-        return userRepository.findByEmail(normalizedEmail);
+        return userRepository.findByEmailAndStatusNot(normalizedEmail, UserStatus.DELETED);
     }
     
     @Override
@@ -108,23 +113,50 @@ public class UserServiceImpl implements UserService {
         if (email == null) {
             return null;
         }
-        return email.trim().toLowerCase();
+        return email.trim().toLowerCase(Locale.ROOT);
     }
 
     @Override
     @CacheEvict(value = "users", key = "#userId")
-    public User updateUser(Long userId, UpdateUserRequest request) {
+    public User updateUser(Long userId, String authenticatedEmail, UpdateUserRequest request) {
 
         log.info("Updating user with ID: {}", userId);
 
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdAndStatusNot(userId, UserStatus.DELETED)
                 .orElseThrow(() -> UserNotFoundException.withId(userId));
 
+        verifyOwnership(user, authenticatedEmail);
+
+        String normalizedEmail = normalizeEmail(request.getEmail());
+        if (!normalizedEmail.equals(user.getEmail())
+                && userRepository.existsByEmailAndIdNot(normalizedEmail, userId)) {
+            throw UserAlreadyExistsException.withEmail(normalizedEmail);
+        }
+        if (!request.getPhoneNumber().equals(user.getPhoneNumber())
+                && userRepository.existsByPhoneNumberAndIdNot(request.getPhoneNumber(), userId)) {
+            throw UserAlreadyExistsException.withPhoneNumber(request.getPhoneNumber());
+        }
+
+        user.setEmail(normalizedEmail);
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());
         user.setPhoneNumber(request.getPhoneNumber());
 
-        User updatedUser = userRepository.save(user);
+        User updatedUser;
+        try {
+            updatedUser = userRepository.saveAndFlush(user);
+        } catch (DataIntegrityViolationException exception) {
+            ConstraintViolationException constraintViolation = findConstraintViolation(exception);
+            if (constraintViolation != null
+                    && "uk_users_email".equals(constraintViolation.getConstraintName())) {
+                throw UserAlreadyExistsException.withEmail(normalizedEmail);
+            }
+            if (constraintViolation != null
+                    && "uk_users_phone_number".equals(constraintViolation.getConstraintName())) {
+                throw UserAlreadyExistsException.withPhoneNumber(request.getPhoneNumber());
+            }
+            throw exception;
+        }
 
         log.info("User updated successfully with ID: {}", userId);
 
@@ -133,15 +165,38 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @CacheEvict(value = "users", key = "#userId")
-    public void deleteUser(Long userId) {
+    public void deleteUser(Long userId, String authenticatedEmail) {
 
         log.info("Deleting user with ID: {}", userId);
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> UserNotFoundException.withId(userId));
 
-        userRepository.delete(user);
+        verifyOwnership(user, authenticatedEmail);
+        if (UserStatus.DELETED.equals(user.getStatus())) {
+            return;
+        }
+
+        user.setStatus(UserStatus.DELETED);
+        userRepository.saveAndFlush(user);
 
         log.info("User deleted successfully with ID: {}", userId);
+    }
+
+    private void verifyOwnership(User user, String authenticatedEmail) {
+        if (!normalizeEmail(user.getEmail()).equals(normalizeEmail(authenticatedEmail))) {
+            throw new AccessDeniedException("You are not authorized to modify this user");
+        }
+    }
+
+    private ConstraintViolationException findConstraintViolation(Throwable exception) {
+        Throwable cause = exception;
+        while (cause != null) {
+            if (cause instanceof ConstraintViolationException violation) {
+                return violation;
+            }
+            cause = cause.getCause();
+        }
+        return null;
     }
 }

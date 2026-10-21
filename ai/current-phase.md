@@ -10,7 +10,7 @@
 - Phase 2 — Authentication & Authorization: **COMPLETE**
 - Phase 3 — Redis Caching, Availability & GEO: **IMPLEMENTATION COMPLETE; DOCUMENTATION REVIEWED; GIT CHECKPOINT DEFERRED**
 - Phase 4 — Kafka Events: **INITIAL REGISTRATION FLOW IMPLEMENTED AND MANUALLY VERIFIED; FULL DATABASE REGRESSION DEFERRED**
-- Phase 5 — User Profile Management: **IN PROGRESS; UPDATE/DELETE SERVICE TESTS ADDED**
+- Phase 5 — User Profile Management: **IMPLEMENTED; ISOLATED REGRESSION VERIFIED; INTEGRATION TESTS DEFERRED**
 
 The Phase 3 documentation review is complete. No Git checkpoint was created because committing is outside the current task.
 
@@ -234,17 +234,31 @@ These endpoints form the foundation for the future delivery assignment workflow.
 
 ### Phase 5 — User Profile Management
 
-- [x] Existing profile update and delete operations retained: `PUT /api/v1/users/{userId}` and `DELETE /api/v1/users/{userId}`
-- [x] Add focused service unit tests for successful profile update, preservation of account fields, and missing-user behavior for update and delete
-- [ ] Define any additional Phase 5 acceptance criteria before expanding beyond the documented update/delete scope
-
-The implementation's current delete operation physically removes the user row. The roadmap does not specify soft deletion, profile ownership rules, or duplicate-phone behavior during updates; these semantics should be agreed before changing them.
+- [x] Update `PUT /api/v1/users/{userId}` with email normalization, duplicate email/phone checks, and the existing request validation conventions
+- [x] Restrict profile update and deletion to the authenticated JWT principal's own account
+- [x] Soft-delete accounts with the existing `DELETED` status; repeated service-level deletion is idempotent
+- [x] Hide deleted users from normal ID and email lookups and reject deleted accounts during JWT authentication
+- [x] Keep unique email and phone constraints for deleted records; re-registration with either value remains unavailable
+- [x] Evict the affected user's Redis cache entry using transaction-aware cache behavior
+- [x] Add focused service tests and controller/security tests for ownership, validation, and response secrecy
 
 #### Phase 5 Verification — Automated
 
-- User Service profile service tests, command from `services/user-service`: `.\mvnw.cmd '-Dtest=UserServiceImplTest' test`
-- Result on October 19, 2026: **14 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**. These are Mockito unit tests and do not connect to MySQL, Redis, or Kafka.
-- Full User and Delivery Service database-backed suites remain intentionally deferred. This focused result is not full-suite regression evidence.
+- User Service focused profile unit tests: **22 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**. The command is included in the combined isolated run below.
+- Isolated profile, account-status/login, auth-service, and registration-event tests: **41 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**. Command from `services/user-service`: `.\mvnw.cmd '-Dtest=UserServiceImplTest,CustomUserDetailsServiceTest,AuthServiceImplTest,UserRegisteredEventPublisherTest' test`.
+- An additional attempted run from `services/user-service` used `.\mvnw.cmd '-Dtest=UserServiceImplTest,CustomUserDetailsServiceTest,AuthServiceImplTest,JwtServiceTest,UserRegisteredEventPublisherTest' test`. Its 38 Mockito tests passed, but the overall command failed with **11 context-startup errors** because MySQL denied access using the unavailable test credentials. The database connection was denied before Flyway could modify a schema; no integration-test method completed.
+- Controller/security integration tests were compiled but not executed because the MySQL test schema and Redis logical DB 15 could not be verified as dedicated/reserved for this continuation. New integration cases cover an old JWT after email change, reauthentication using the new email, and rejection of the old JWT after soft deletion.
+- No successful database- or Redis-backed tests were run; `user_db` and shared Redis data were not targeted.
+
+#### Phase 5 Lifecycle and API Decisions
+
+- `PUT /api/v1/users/{userId}` accepts email, first name, last name, and phone number. Email is trimmed/lowercased as at registration. Phone numbers retain the project's existing ten-digit format without country-specific normalization.
+- Update/delete ownership is checked against the normalized email in the persisted user record and the authenticated JWT principal. Registration, profile updates, and login trim/lowercase email using `Locale.ROOT`. Changing email makes tokens with the previous email subject unusable on subsequent requests; the user must log in again using the new email.
+- `DELETE /api/v1/users/{userId}` sets status to `DELETED`; no Kafka deletion event is published. Deleted rows retain unique email/phone values, so those values cannot be re-registered. The endpoint uses the existing authenticated status check, meaning a previously deleted account's old token is rejected on the next request.
+- Cache evictions apply only to the affected user and are deferred until successful transaction completion. A failed database transaction does not evict the cache entry.
+- Redis eviction failures are logged and suppressed by the existing `RedisCacheErrorHandler`; during a Redis outage, a stale cache key may remain until its ten-minute TTL. This environment-dependent failure mode was not exercised. Strict invalidation guarantees require reliable Redis availability or a durable invalidation/reconciliation mechanism.
+- At the HTTP layer, after the first DELETE commits, the account's JWT is rejected; a repeated DELETE using that token returns `401`. The service operation itself is idempotent if invoked with the user's identity.
+- The existing read-by-ID endpoint remains authenticated but is not restricted to the caller's own ID. This phase applies ownership authorization to changes and deletion, not read access.
 
 ## Phase 4 Follow-up — Deferred
 

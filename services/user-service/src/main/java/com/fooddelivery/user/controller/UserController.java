@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -33,7 +34,7 @@ public class UserController {
     public ResponseEntity<UserResponse> createUser(
             @Valid @RequestBody CreateUserRequest createUserRequest) {
         
-        log.info("POST /api/v1/users - Creating user with email: {}", createUserRequest.getEmail());
+        log.info("POST /api/v1/users - Creating user");
         
         User user = userService.createUser(createUserRequest);
         UserResponse response = userMapper.toResponse(user);
@@ -59,22 +60,25 @@ public class UserController {
     }
 
     @PutMapping("/{userId}")
-    public ResponseEntity<UserResponse> updateUser(@PathVariable Long userId, @Valid @RequestBody UpdateUserRequest request) {
+    public ResponseEntity<UserResponse> updateUser(
+            @PathVariable Long userId,
+            @Valid @RequestBody UpdateUserRequest request,
+            Authentication authentication) {
 
         log.info("PUT /api/v1/users/{} - Updating user", userId);
 
-        User updatedUser = userService.updateUser(userId, request);
+        User updatedUser = userService.updateUser(userId, authentication.getName(), request);
         UserResponse response = userMapper.toResponse(updatedUser);
 
         return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/{userId}")
-    public ResponseEntity<Void> deleteUser(@PathVariable Long userId) {
+    public ResponseEntity<Void> deleteUser(@PathVariable Long userId, Authentication authentication) {
 
         log.info("DELETE /api/v1/users/{} - Deleting user", userId);
 
-        userService.deleteUser(userId);
+        userService.deleteUser(userId, authentication.getName());
 
         return ResponseEntity.noContent().build();
     }

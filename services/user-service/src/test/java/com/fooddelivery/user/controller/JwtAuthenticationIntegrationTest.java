@@ -4,6 +4,7 @@ import com.fooddelivery.user.domain.entity.User;
 import com.fooddelivery.user.domain.enums.UserStatus;
 import com.fooddelivery.user.domain.repository.UserRepository;
 import com.fooddelivery.user.dto.request.LoginRequest;
+import com.fooddelivery.user.dto.request.UpdateUserRequest;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -190,6 +191,53 @@ class JwtAuthenticationIntegrationTest {
                 .content(objectMapper.writeValueAsString(loginRequest)))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    void testEmailChangeRequiresNewJwtButAllowsReauthentication() throws Exception {
+        String oldToken = loginAndGetToken(testEmail);
+        UpdateUserRequest updateRequest = new UpdateUserRequest();
+        updateRequest.setEmail("updated@example.com");
+        updateRequest.setFirstName("John");
+        updateRequest.setLastName("Doe");
+        updateRequest.setPhoneNumber("1234567890");
+
+        mockMvc.perform(put("/api/v1/users/" + activeUser.getId())
+                        .header("Authorization", "Bearer " + oldToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("updated@example.com"));
+
+        mockMvc.perform(get("/api/v1/users/" + activeUser.getId())
+                        .header("Authorization", "Bearer " + oldToken))
+                .andExpect(status().isUnauthorized());
+
+        String newToken = loginAndGetToken("updated@example.com");
+        mockMvc.perform(get("/api/v1/users/" + activeUser.getId())
+                        .header("Authorization", "Bearer " + newToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("updated@example.com"));
+    }
+
+    @Test
+    void testPreviouslyIssuedJwtIsRejectedAfterSoftDeletion() throws Exception {
+        String token = loginAndGetToken(testEmail);
+
+        mockMvc.perform(delete("/api/v1/users/" + activeUser.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
+
+        User deletedUser = userRepository.findById(activeUser.getId()).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(UserStatus.DELETED, deletedUser.getStatus());
+
+        mockMvc.perform(get("/api/v1/users/" + activeUser.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(delete("/api/v1/users/" + activeUser.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+    }
     
     @Test
     void testInactiveUserCannotLogin() throws Exception {
@@ -234,5 +282,21 @@ class JwtAuthenticationIntegrationTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(loginRequest)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    private String loginAndGetToken(String email) throws Exception {
+        LoginRequest loginRequest = LoginRequest.builder()
+                .email(email)
+                .password(testPassword)
+                .build();
+
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .get("accessToken").asText();
     }
 }

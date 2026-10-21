@@ -59,17 +59,19 @@ public interface UserService {
      * Update an existing user.
      * 
      * @param userId the ID of the user to update
+     * @param authenticatedEmail the authenticated principal's email
      * @param request the update request containing new details
      * @return the updated user entity
      * @throws UserNotFoundException if user does not exist
      */
-    User updateUser(Long userId, UpdateUserRequest request);
+    User updateUser(Long userId, String authenticatedEmail, UpdateUserRequest request);
 
     /**
      * Delete a user by ID.
      *
      * @param userId the user ID
+     * @param authenticatedEmail the authenticated principal's email
      * @throws UserNotFoundException if user does not exist
      */
-    void deleteUser(Long userId);
+    void deleteUser(Long userId, String authenticatedEmail);
 }

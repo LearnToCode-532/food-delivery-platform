@@ -18,7 +18,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.cache.annotation.CacheEvict;
+import org.hibernate.exception.ConstraintViolationException;
 
+import java.lang.reflect.Method;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -255,7 +259,7 @@ class UserServiceImplTest {
                 .status(UserStatus.ACTIVE)
                 .build();
         
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
         
         // Act
@@ -266,13 +270,13 @@ class UserServiceImplTest {
         assertEquals(1L, result.get().getId());
         assertEquals("john@example.com", result.get().getEmail());
         
-        verify(userRepository, times(1)).findById(1L);
+        verify(userRepository, times(1)).findByIdAndStatusNot(1L, UserStatus.DELETED);
     }
     
     @Test
     void testGetUserByIdNotFound() {
         // Arrange
-        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+        when(userRepository.findByIdAndStatusNot(999L, UserStatus.DELETED)).thenReturn(Optional.empty());
         
         // Act
         Optional<UserResponse> result = userService.getUserById(999L);
@@ -280,7 +284,7 @@ class UserServiceImplTest {
         // Assert
         assertFalse(result.isPresent());
         
-        verify(userRepository, times(1)).findById(999L);
+        verify(userRepository, times(1)).findByIdAndStatusNot(999L, UserStatus.DELETED);
     }
     
     @Test
@@ -296,7 +300,8 @@ class UserServiceImplTest {
                 .status(UserStatus.ACTIVE)
                 .build();
         
-        when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailAndStatusNot("john@example.com", UserStatus.DELETED))
+                .thenReturn(Optional.of(user));
         
         // Act
         Optional<User> result = userService.getUserByEmail("john@example.com");
@@ -318,36 +323,136 @@ class UserServiceImplTest {
                 .status(UserStatus.ACTIVE)
                 .build();
         UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("  JOHN@EXAMPLE.COM ");
         request.setFirstName("Jane");
         request.setLastName("Smith");
-        request.setPhoneNumber("1234567890");
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(user)).thenReturn(user);
+        request.setPhoneNumber("9876543210");
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
+        when(userRepository.saveAndFlush(user)).thenReturn(user);
 
-        User result = userService.updateUser(1L, request);
+        User result = userService.updateUser(1L, "john@example.com", request);
 
         assertSame(user, result);
         assertEquals("Jane", result.getFirstName());
         assertEquals("Smith", result.getLastName());
-        assertEquals("1234567890", result.getPhoneNumber());
+        assertEquals("9876543210", result.getPhoneNumber());
         assertEquals("john@example.com", result.getEmail());
         assertEquals("existing-hash", result.getPasswordHash());
         assertEquals(UserStatus.ACTIVE, result.getStatus());
-        verify(userRepository).save(user);
+        verify(userRepository).saveAndFlush(user);
+        verify(userRepository, never()).existsByEmailAndIdNot(anyString(), anyLong());
+        verify(userRepository, never()).existsByPhoneNumberAndIdNot(anyString(), anyLong());
     }
 
     @Test
     void testUpdateUserNotFound() {
-        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+        when(userRepository.findByIdAndStatusNot(999L, UserStatus.DELETED)).thenReturn(Optional.empty());
         UpdateUserRequest request = new UpdateUserRequest();
 
-        assertThrows(UserNotFoundException.class, () -> userService.updateUser(999L, request));
+        assertThrows(UserNotFoundException.class,
+                () -> userService.updateUser(999L, "john@example.com", request));
 
-        verify(userRepository, never()).save(any(User.class));
+        verify(userRepository, never()).saveAndFlush(any(User.class));
     }
 
     @Test
-    void testDeleteUserRemovesExistingUser() {
+    void testUpdateUserRejectsAnotherUsersAccount() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .status(UserStatus.ACTIVE).build();
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
+
+        UpdateUserRequest request = new UpdateUserRequest();
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> userService.updateUser(1L, "other@example.com", request));
+
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void testUpdateUserRejectsDuplicateEmailAndPhone() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .phoneNumber("9876543210").status(UserStatus.ACTIVE).build();
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("other@example.com");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("1234567890");
+
+        when(userRepository.existsByEmailAndIdNot("other@example.com", 1L)).thenReturn(true);
+        assertThrows(UserAlreadyExistsException.class,
+                () -> userService.updateUser(1L, "john@example.com", request));
+
+        when(userRepository.existsByEmailAndIdNot("other@example.com", 1L)).thenReturn(false);
+        when(userRepository.existsByPhoneNumberAndIdNot("1234567890", 1L)).thenReturn(true);
+        assertThrows(UserAlreadyExistsException.class,
+                () -> userService.updateUser(1L, "john@example.com", request));
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void testUpdateUserNormalizesNewEmail() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .phoneNumber("9876543210").status(UserStatus.ACTIVE).build();
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
+        when(userRepository.existsByEmailAndIdNot("jane@example.com", 1L)).thenReturn(false);
+        when(userRepository.saveAndFlush(user)).thenReturn(user);
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("  Jane@EXAMPLE.COM ");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("9876543210");
+
+        User result = userService.updateUser(1L, "john@example.com", request);
+
+        assertEquals("jane@example.com", result.getEmail());
+        verify(userRepository).existsByEmailAndIdNot("jane@example.com", 1L);
+    }
+
+    @Test
+    void testUpdateUserMapsConcurrentUniqueConstraintConflict() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .phoneNumber("9876543210").status(UserStatus.ACTIVE).build();
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
+
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("other@example.com");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("1234567890");
+        ConstraintViolationException violation = new ConstraintViolationException(
+                "duplicate email", null, "uk_users_email");
+        when(userRepository.saveAndFlush(user))
+                .thenThrow(new DataIntegrityViolationException("unique", violation));
+
+        assertThrows(UserAlreadyExistsException.class,
+                () -> userService.updateUser(1L, "john@example.com", request));
+    }
+
+    @Test
+    void testUpdateUserMapsConcurrentPhoneConstraintConflict() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .phoneNumber("9876543210").status(UserStatus.ACTIVE).build();
+        when(userRepository.findByIdAndStatusNot(1L, UserStatus.DELETED)).thenReturn(Optional.of(user));
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("john@example.com");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("1234567890");
+        when(userRepository.existsByPhoneNumberAndIdNot("1234567890", 1L)).thenReturn(false);
+        ConstraintViolationException violation = new ConstraintViolationException(
+                "duplicate phone", null, "uk_users_phone_number");
+        when(userRepository.saveAndFlush(user))
+                .thenThrow(new DataIntegrityViolationException("unique", violation));
+
+        UserAlreadyExistsException exception = assertThrows(UserAlreadyExistsException.class,
+                () -> userService.updateUser(1L, "john@example.com", request));
+
+        assertEquals("User with phone number '1234567890' already exists", exception.getMessage());
+    }
+
+    @Test
+    void testDeleteUserSoftDeletesExistingUser() {
         User user = User.builder()
                 .id(1L)
                 .email("john@example.com")
@@ -358,18 +463,69 @@ class UserServiceImplTest {
                 .status(UserStatus.ACTIVE)
                 .build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.saveAndFlush(user)).thenReturn(user);
 
-        userService.deleteUser(1L);
+        userService.deleteUser(1L, "john@example.com");
 
-        verify(userRepository).delete(user);
+        assertEquals(UserStatus.DELETED, user.getStatus());
+        verify(userRepository).saveAndFlush(user);
+        verify(userRepository, never()).delete(any(User.class));
+        verify(userRegisteredEventPublisher, never()).publishAfterCommit(anyLong());
     }
 
     @Test
     void testDeleteUserNotFound() {
         when(userRepository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThrows(UserNotFoundException.class, () -> userService.deleteUser(999L));
+        assertThrows(UserNotFoundException.class,
+                () -> userService.deleteUser(999L, "john@example.com"));
 
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void testDeleteUserIsIdempotentAndChecksOwnership() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .status(UserStatus.DELETED).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUser(1L, "john@example.com");
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> userService.deleteUser(1L, "other@example.com"));
+    }
+
+    @Test
+    void testDeleteUserRejectsAnotherUsersActiveAccount() {
+        User user = User.builder().id(1L).email("john@example.com")
+                .status(UserStatus.ACTIVE).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> userService.deleteUser(1L, "other@example.com"));
+
+        verify(userRepository, never()).saveAndFlush(any(User.class));
         verify(userRepository, never()).delete(any(User.class));
+    }
+
+    @Test
+    void testUpdateAndDeleteEvictOnlyTheUsersCacheAfterSuccessfulInvocation() throws Exception {
+        Method updateMethod = UserServiceImpl.class.getMethod(
+                "updateUser", Long.class, String.class, UpdateUserRequest.class);
+        Method deleteMethod = UserServiceImpl.class.getMethod(
+                "deleteUser", Long.class, String.class);
+
+        CacheEvict updateEviction = updateMethod.getAnnotation(CacheEvict.class);
+        CacheEvict deleteEviction = deleteMethod.getAnnotation(CacheEvict.class);
+
+        assertNotNull(updateEviction);
+        assertNotNull(deleteEviction);
+        assertArrayEquals(new String[]{"users"}, updateEviction.value());
+        assertArrayEquals(new String[]{"users"}, deleteEviction.value());
+        assertEquals("#userId", updateEviction.key());
+        assertEquals("#userId", deleteEviction.key());
+        assertFalse(updateEviction.beforeInvocation());
+        assertFalse(deleteEviction.beforeInvocation());
     }
 }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -89,6 +90,28 @@ class AuthServiceImplTest {
         verify(authenticationManager).authenticate(any(UsernamePasswordAuthenticationToken.class));
         verify(jwtService).generateToken(testEmail);
         verify(jwtService).getExpirationInSeconds();
+    }
+
+    @Test
+    void testLoginNormalizesEmailBeforeAuthenticationAndTokenGeneration() {
+        LoginRequest request = LoginRequest.builder()
+                .email("  JOHN@EXAMPLE.COM  ")
+                .password(testPassword)
+                .build();
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+                .thenReturn(authentication);
+        when(jwtService.generateToken(testEmail)).thenReturn(testToken);
+        when(jwtService.getExpirationInSeconds()).thenReturn(3600L);
+
+        LoginResponse response = authService.login(request);
+
+        assertEquals(testToken, response.getAccessToken());
+        ArgumentCaptor<UsernamePasswordAuthenticationToken> authenticationCaptor =
+                ArgumentCaptor.forClass(UsernamePasswordAuthenticationToken.class);
+        verify(authenticationManager).authenticate(authenticationCaptor.capture());
+        assertEquals(testEmail, authenticationCaptor.getValue().getPrincipal());
+        assertEquals(testPassword, authenticationCaptor.getValue().getCredentials());
+        verify(jwtService).generateToken(testEmail);
     }
     
     @Test

@@ -5,7 +5,7 @@ A Java microservices learning project for exploring user management, delivery-pa
 ## Project status
 
 - **Phase 4:** The initial user-registration event flow is implemented and was manually verified. Full database-backed regression testing has not been completed.
-- **Phase 5:** Profile-management correctness and security review is in progress. Focused update/delete service tests have been added.
+- **Phase 5:** Profile update, ownership checks, soft deletion, and transaction-aware cache invalidation are implemented. Focused unit and controller/security tests are in place; see [`ai/current-phase.md`](ai/current-phase.md) for current verification results and test-isolation limits.
 
 See [`ai/current-phase.md`](ai/current-phase.md) for the detailed phase status and recorded verification history.
 
@@ -15,7 +15,42 @@ See [`ai/current-phase.md`](ai/current-phase.md) for the detailed phase status a
 
 The User Service provides user registration and retrieval, profile update and deletion, and login. It uses Spring Data JPA with MySQL, validates requests, hashes passwords with BCrypt, and implements JWT authentication.
 
-The current security configuration makes registration and login public and requires authentication for user endpoints. Ownership authorization for profile reads, updates, and deletion still needs review; requiring a valid JWT does not by itself establish that the authenticated user owns the requested profile.
+Profile changes use the authenticated principal's identity; clients cannot update or delete another account by supplying its ID. Email is trimmed and lowercased consistently at registration, profile update, and login. Deletion is soft and preserves unique email/phone ownership, so deleted accounts cannot re-register with those identifiers. Changing email invalidates tokens containing the previous email subject, so the user must log in again.
+
+#### Profile API
+
+Update the authenticated user's profile:
+
+```http
+PUT /api/v1/users/{userId}
+Authorization: Bearer <JWT>
+Content-Type: application/json
+```
+
+```json
+{
+  "email": "john@example.com",
+  "firstName": "John",
+  "lastName": "Doe",
+  "phoneNumber": "9876543210"
+}
+```
+
+Returns `200 OK` with the user response DTO. Email is trimmed and lowercased; phone numbers retain the existing ten-digit format. Invalid input returns `400`, missing/invalid authentication returns `401`, a non-owner returns `403`, an absent/deleted user returns `404`, and duplicate email/phone returns `409`.
+
+Delete the authenticated user's profile:
+
+```http
+DELETE /api/v1/users/{userId}
+Authorization: Bearer <JWT>
+```
+
+Returns `204 No Content`. Deletion sets the account status to `DELETED` rather than removing the row; the account's email and phone remain reserved, and the account cannot log in or use its existing JWT on subsequent requests. No deletion event is published.
+Because the old token is rejected after the first deletion, retrying the HTTP request with that token returns `401`; the service-level delete operation itself is idempotent.
+
+Missing or invalid authentication returns `401`, a non-owner returns `403`, and an unknown user ID returns `404`.
+
+The current security configuration makes registration and login public and requires authentication for user endpoints. Profile updates and deletion verify that the authenticated JWT principal owns the requested account. The authenticated read-by-ID endpoint remains ID-based and does not restrict reads to the caller's own account.
 
 ### Delivery Service
 
@@ -88,7 +123,7 @@ Set-Location D:\food-delivery-platform\services\notification-service
 
 The following results are recorded in [`ai/current-phase.md`](ai/current-phase.md); they are scoped results, not evidence that every service regression suite passes:
 
-- **User Service unit tests:** `UserServiceImplTest` has a report showing 14 tests passed, with no failures or errors. Separately, the combined focused run of `UserServiceImplTest` and `UserRegisteredEventPublisherTest` is recorded as 15 tests passed. These are different scopes.
+- **User Service isolated regression tests:** the current profile, account-status/login, auth-service, and registration-event tests passed 41 tests with no failures or errors. The controller/security tests compiled but were not executed because test database and Redis isolation could not be verified. A separate test selection including `JwtServiceTest` failed during Spring context startup because test MySQL credentials were unavailable; details are in [`ai/current-phase.md`](ai/current-phase.md).
 - **Notification Service tests:** the focused service test run is recorded as 7 tests passed. This covers consumer, event JSON, and Kafka error-handler behavior; it is not a broker-backed integration run.
 - **Delivery Service test compilation:** `.\mvnw.cmd -DskipTests test-compile` compiled the five test source files successfully. Tests were not executed by this command.
 - **Full database-backed User and Delivery regression:** deferred and not verified. A previous Delivery report used `delivery_db`, so it is not accepted as safe regression evidence.
@@ -118,7 +153,8 @@ The User and Notification focused test commands do not replace full database-bac
 - No transactional outbox: a committed user registration can be missing its Kafka event if publishing fails.
 - No idempotent event processing, dead-letter topic, or exactly-once guarantee.
 - Automated broker-backed integration tests and full safe database-backed User/Delivery regression remain deferred.
-- Profile ownership authorization needs review; authentication alone does not confirm ownership.
+- Authenticated read-by-ID remains unrestricted by ownership; profile updates and deletion enforce ownership.
+- Cache eviction is transaction-aware, but the existing Redis error handler suppresses eviction failures; a Redis outage can leave stale profile data until the cache TTL expires.
 - Delivery assignment, order, payment, and notification-provider workflows are not implemented.
 - Redis/MySQL consistency and recovery need further work.
 - Kubernetes, CI/CD, production deployment, and expanded observability are planned rather than completed.

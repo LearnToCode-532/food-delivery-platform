@@ -4,13 +4,17 @@ import com.fooddelivery.user.domain.entity.User;
 import com.fooddelivery.user.domain.enums.UserStatus;
 import com.fooddelivery.user.domain.service.UserService;
 import com.fooddelivery.user.dto.request.CreateUserRequest;
+import com.fooddelivery.user.dto.request.UpdateUserRequest;
 import com.fooddelivery.user.dto.response.UserResponse;
 import com.fooddelivery.user.exception.UserAlreadyExistsException;
 import com.fooddelivery.user.mapper.UserMapper;
+import com.fooddelivery.user.security.CustomUserDetailsService;
 import com.fooddelivery.user.security.JwtService;
 
 import tools.jackson.databind.ObjectMapper;
 
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +55,9 @@ class UserControllerIntegrationTest {
 
     @MockitoBean
     JwtService jwtService;
+
+    @MockitoBean
+    CustomUserDetailsService customUserDetailsService;
     
     private CreateUserRequest createUserRequest;
     private User user;
@@ -195,8 +202,7 @@ class UserControllerIntegrationTest {
         // Arrange
         when(userService.getUserById(1L)).thenReturn(Optional.of(userResponse));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
-        when(jwtService.validateToken("test-token")).thenReturn(true);
-        when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
+        authenticateAs(user.getEmail());
         
         // Act & Assert
         mockMvc.perform(get("/api/v1/users/1").header(
@@ -221,8 +227,7 @@ class UserControllerIntegrationTest {
     void testGetUserNotFound() throws Exception {
         // Arrange
         when(userService.getUserById(999L)).thenReturn(Optional.empty());
-        when(jwtService.validateToken("test-token")).thenReturn(true);
-        when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
+        authenticateAs(user.getEmail());
         
         // Act & Assert
         mockMvc.perform(get("/api/v1/users/999").header(
@@ -265,8 +270,7 @@ class UserControllerIntegrationTest {
         // Arrange
         when(userService.getUserById(1L)).thenReturn(Optional.of(userResponse));
         when(userMapper.toResponse(user)).thenReturn(userResponse);
-        when(jwtService.validateToken("test-token")).thenReturn(true);
-        when(jwtService.getSubjectFromToken("test-token")).thenReturn(user.getEmail());
+        authenticateAs(user.getEmail());
         
         // Act
         MvcResult result = mockMvc.perform(get("/api/v1/users/1").header(
@@ -282,5 +286,125 @@ class UserControllerIntegrationTest {
         assertThat(responseBody).doesNotContain("password");
         assertThat(responseBody).doesNotContain("passwordHash");
         assertThat(responseBody).doesNotContain("hashedPassword123");
+    }
+
+    @Test
+    void testUpdateUserUsesAuthenticatedIdentityAndDoesNotExposeSecrets() throws Exception {
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("  JOHN@EXAMPLE.COM ");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("9876543210");
+        when(userService.updateUser(eq(1L), eq(user.getEmail()), any(UpdateUserRequest.class)))
+                .thenReturn(user);
+        when(userMapper.toResponse(user)).thenReturn(userResponse);
+        authenticateAs(user.getEmail());
+
+        MvcResult result = mockMvc.perform(put("/api/v1/users/1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1L))
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("hashedPassword123");
+        verify(userService).updateUser(eq(1L), eq(user.getEmail()), any(UpdateUserRequest.class));
+    }
+
+    @Test
+    void testDeleteUserUsesAuthenticatedIdentity() throws Exception {
+        authenticateAs(user.getEmail());
+
+        mockMvc.perform(delete("/api/v1/users/1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer test-token"))
+                .andExpect(status().isNoContent());
+
+        verify(userService).deleteUser(1L, user.getEmail());
+    }
+
+    @Test
+    void testUpdateUserRejectsOwnershipMismatch() throws Exception {
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("john@example.com");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("9876543210");
+        when(userService.updateUser(eq(2L), eq(user.getEmail()), any(UpdateUserRequest.class)))
+                .thenThrow(new AccessDeniedException("not authorized"));
+        authenticateAs(user.getEmail());
+
+        mockMvc.perform(put("/api/v1/users/2")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"));
+    }
+
+    @Test
+    void testDeleteUserRejectsOwnershipMismatch() throws Exception {
+        doThrow(new AccessDeniedException("not authorized"))
+                .when(userService).deleteUser(2L, user.getEmail());
+        authenticateAs(user.getEmail());
+
+        mockMvc.perform(delete("/api/v1/users/2")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer test-token"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"));
+    }
+
+    @Test
+    void testProfileChangesRequireAuthentication() throws Exception {
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("john@example.com");
+        request.setFirstName("Jane");
+        request.setLastName("Smith");
+        request.setPhoneNumber("9876543210");
+
+        mockMvc.perform(put("/api/v1/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/v1/users/1"))
+                .andExpect(status().isUnauthorized());
+
+        verify(userService, never()).updateUser(anyLong(), anyString(), any(UpdateUserRequest.class));
+        verify(userService, never()).deleteUser(anyLong(), anyString());
+    }
+
+    @Test
+    void testUpdateUserValidatesEmailAndProfileFields() throws Exception {
+        UpdateUserRequest request = new UpdateUserRequest();
+        request.setEmail("not-an-email");
+        request.setFirstName("J");
+        request.setLastName("Smith");
+        request.setPhoneNumber("123");
+        authenticateAs(user.getEmail());
+
+        mockMvc.perform(put("/api/v1/users/1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.email").exists())
+                .andExpect(jsonPath("$.fieldErrors.phoneNumber").exists());
+
+        verify(userService, never()).updateUser(anyLong(), anyString(), any(UpdateUserRequest.class));
+    }
+
+    private void authenticateAs(String email) {
+        when(jwtService.validateToken("test-token")).thenReturn(true);
+        when(jwtService.getSubjectFromToken("test-token")).thenReturn(email);
+        UserDetails userDetails = org.springframework.security.core.userdetails.User
+                .withUsername(email)
+                .password("test-hash")
+                .authorities(java.util.List.of())
+                .build();
+        when(customUserDetailsService.loadUserByUsername(email)).thenReturn(userDetails);
     }
 }

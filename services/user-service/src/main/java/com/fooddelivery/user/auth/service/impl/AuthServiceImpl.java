@@ -11,6 +11,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 
+import java.util.Locale;
+
 /**
  * Authentication Service implementation.
  * 
@@ -38,21 +40,22 @@ public class AuthServiceImpl implements AuthService {
     
     @Override
     public LoginResponse login(LoginRequest loginRequest) {
-        log.debug("Attempting authentication for user: {}", loginRequest.getEmail());
-        
+        String normalizedEmail = loginRequest.getEmail().trim().toLowerCase(Locale.ROOT);
+        log.debug("Attempting authentication for user: {}", normalizedEmail);
+
         // Authenticate using Spring Security
         // This will use AuthenticationProvider -> UserDetailsService -> PasswordEncoder
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
-                        loginRequest.getEmail(),
+                        normalizedEmail,
                         loginRequest.getPassword()
                 )
         );
         
-        log.debug("Authentication successful for user: {}", loginRequest.getEmail());
+        log.debug("Authentication successful for user: {}", normalizedEmail);
         
         // Generate JWT token
-        String accessToken = jwtService.generateToken(loginRequest.getEmail());
+        String accessToken = jwtService.generateToken(normalizedEmail);
         long expiresIn = jwtService.getExpirationInSeconds();
         
         return LoginResponse.builder()
