@@ -6,11 +6,7 @@ import com.fooddelivery.user.dto.response.LoginResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -57,17 +53,9 @@ public class AuthController {
      */
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest loginRequest) {
-        try {
-            log.debug("Login attempt for email: {}", loginRequest.getEmail());
-            LoginResponse loginResponse = authService.login(loginRequest);
-            log.debug("Login successful for email: {}", loginRequest.getEmail());
-            return ResponseEntity.ok(loginResponse);
-        } catch (UsernameNotFoundException | BadCredentialsException e) {
-            log.debug("Login failed for email: {} - Invalid credentials", loginRequest.getEmail());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        } catch (AuthenticationException e) {
-            log.debug("Login failed for email: {} - Authentication exception: {}", loginRequest.getEmail(), e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
+        log.debug("Login attempt for email: {}", loginRequest.getEmail());
+        LoginResponse loginResponse = authService.login(loginRequest);
+        log.debug("Login successful for email: {}", loginRequest.getEmail());
+        return ResponseEntity.ok(loginResponse);
     }
 }

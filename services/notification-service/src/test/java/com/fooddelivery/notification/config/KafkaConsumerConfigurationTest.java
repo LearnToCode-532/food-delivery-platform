@@ -38,6 +38,7 @@ class KafkaConsumerConfigurationTest {
         assertFalse(handler.handleOne(failure, record, consumer, container));
         assertTrue(handler.handleOne(failure, record, consumer, container));
 
+        assertTrue(output.getOut().contains("Kafka record recovered without a dead-letter topic"));
         assertTrue(output.getOut().contains("topic=user.events, partition=0, offset=7"));
         assertFalse(output.getOut().contains("sensitive-payload"));
     }
@@ -56,6 +57,7 @@ class KafkaConsumerConfigurationTest {
 
         assertTrue(handler.handleOne(failure, record, consumer, container));
         assertTrue(handler.isAckAfterHandle());
+        assertTrue(output.getOut().contains("Kafka record recovered without a dead-letter topic"));
         assertTrue(output.getOut().contains("topic=user.events, partition=0, offset=8"));
     }
 }

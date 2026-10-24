@@ -1,6 +1,7 @@
 package com.fooddelivery.user.config;
 
 import com.fooddelivery.user.security.JwtAuthenticationFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +13,13 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import tools.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Spring Security Configuration.
@@ -31,6 +37,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
     
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final ObjectMapper objectMapper;
     
     /**
      * Configure security filter chain.
@@ -57,9 +64,10 @@ public class SecurityConfig {
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
             .exceptionHandling(exception -> exception
-                .authenticationEntryPoint(
-                    new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)
-                )
+                .authenticationEntryPoint((request, response, authException) ->
+                    writeErrorResponse(response, HttpStatus.UNAUTHORIZED, "Authentication required", request.getRequestURI()))
+                .accessDeniedHandler((request, response, accessDeniedException) ->
+                    writeErrorResponse(response, HttpStatus.FORBIDDEN, "You are not authorized to access this resource", request.getRequestURI()))
             )
             // Authorization rules
             .authorizeHttpRequests(auth -> auth
@@ -95,5 +103,21 @@ public class SecurityConfig {
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
+    }
+
+    private void writeErrorResponse(HttpServletResponse response, HttpStatus status, String message, String path)
+            throws IOException {
+        response.setStatus(status.value());
+        response.setContentType("application/json");
+        response.setCharacterEncoding("UTF-8");
+
+        Map<String, Object> errorResponse = new LinkedHashMap<>();
+        errorResponse.put("timestamp", Instant.now());
+        errorResponse.put("status", status.value());
+        errorResponse.put("error", status.getReasonPhrase());
+        errorResponse.put("message", message);
+        errorResponse.put("path", path);
+
+        objectMapper.writeValue(response.getOutputStream(), errorResponse);
     }
 }

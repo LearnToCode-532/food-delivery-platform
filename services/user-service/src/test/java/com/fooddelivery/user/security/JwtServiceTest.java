@@ -1,11 +1,14 @@
 package com.fooddelivery.user.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -23,23 +26,23 @@ import static org.junit.jupiter.api.Assertions.*;
  * 8. JWT does not contain password or passwordHash
  * 9. Subject can be extracted from JWT
  */
-@SpringBootTest
-@TestPropertySource(properties = {
-        "jwt.secret-key=test-secret-key-must-be-at-least-256-bits-long-1234567890",
-        "jwt.expiration-ms=3600000"
-})
 class JwtServiceTest {
-    
-    @Autowired
+
+    private static final String TEST_SECRET =
+            "test-secret-key-must-be-at-least-256-bits-long-1234567890";
+
     private JwtService jwtService;
-    
+
     private String testSubject;
-    
+
     @BeforeEach
     void setUp() {
+        jwtService = new JwtService();
+        ReflectionTestUtils.setField(jwtService, "secretKeyString", TEST_SECRET);
+        ReflectionTestUtils.setField(jwtService, "jwtExpirationMs", 3_600_000L);
         testSubject = "john@example.com";
     }
-    
+
     @Test
     void testGenerateToken() {
         // Act
@@ -117,6 +120,19 @@ class JwtServiceTest {
         
         // Assert
         assertFalse(isValid);
+    }
+
+    @Test
+    void testValidateExpiredToken() {
+        String expiredToken = Jwts.builder()
+                .subject(testSubject)
+                .issuedAt(new Date(0))
+                .expiration(new Date(1))
+                .signWith(Keys.hmacShaKeyFor(TEST_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+
+        assertFalse(jwtService.validateToken(expiredToken));
+        assertTrue(jwtService.isTokenExpired(expiredToken));
     }
     
     @Test

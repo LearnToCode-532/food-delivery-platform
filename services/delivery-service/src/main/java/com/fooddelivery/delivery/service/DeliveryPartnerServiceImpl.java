@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 
@@ -80,13 +82,12 @@ public class DeliveryPartnerServiceImpl
 
         DeliveryPartner partner = getDeliveryPartner(id);
 
-        // Remove the partner from Redis GEO location tracking
-        geoRedisService.removeLocation(id);
-
-        // Remove the partner from the Redis availability set
-        redisService.removeAvailablePartner(id);
-        
         repository.delete(partner);
+
+        afterCommit(() -> {
+            geoRedisService.removeLocation(id);
+            redisService.removeAvailablePartner(id);
+        });
 
         log.info(
                 "Delivery partner deleted id={}",
@@ -127,8 +128,7 @@ public class DeliveryPartnerServiceImpl
         // Persist to MySQL first (durable source of truth)
         DeliveryPartner saved = repository.save(partner);
 
-        // Update Redis based on status transition
-        handleRedisUpdate(id, oldStatus, newStatus);
+        afterCommit(() -> handleRedisUpdate(id, oldStatus, newStatus));
 
         log.info(
                 "Delivery partner {} availability changed from {} to {}",
@@ -167,6 +167,15 @@ public class DeliveryPartnerServiceImpl
                 && newStatus != DeliveryPartnerStatus.AVAILABLE) {
             redisService.removeAvailablePartner(partnerId);
         }
+    }
+
+    private void afterCommit(Runnable action) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 
     @Override

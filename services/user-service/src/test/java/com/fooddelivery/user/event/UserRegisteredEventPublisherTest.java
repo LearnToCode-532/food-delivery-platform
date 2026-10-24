@@ -3,6 +3,9 @@ package com.fooddelivery.user.event;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.support.SendResult;
@@ -23,6 +26,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class UserRegisteredEventPublisherTest {
 
     private KafkaTemplate<String, UserRegistered> kafkaTemplate;
@@ -76,7 +80,7 @@ class UserRegisteredEventPublisherTest {
     }
 
     @Test
-    void asynchronousKafkaFailureDoesNotUndoCommittedRegistrationOrDisappearSilently() {
+    void asynchronousKafkaFailureDoesNotUndoCommittedRegistrationAndIsLogged(CapturedOutput output) {
         when(kafkaTemplate.send(eq("user.events"), anyString(), any(UserRegistered.class)))
                 .thenReturn(CompletableFuture.failedFuture(new KafkaException("broker unavailable")));
 
@@ -85,10 +89,13 @@ class UserRegisteredEventPublisherTest {
         assertDoesNotThrow(() -> TransactionSynchronizationManager.getSynchronizations()
                 .forEach(TransactionSynchronization::afterCommit));
         verify(kafkaTemplate).send(eq("user.events"), anyString(), any(UserRegistered.class));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                output.getOut().contains("Kafka send failed for UserRegistered event")
+                        && output.getOut().contains("and user 42"));
     }
 
     @Test
-    void synchronousKafkaFailureDoesNotEscapeThePostCommitCallback() {
+    void synchronousKafkaFailureDoesNotEscapeThePostCommitCallbackAndIsLogged(CapturedOutput output) {
         when(kafkaTemplate.send(eq("user.events"), anyString(), any(UserRegistered.class)))
                 .thenThrow(new KafkaException("broker metadata unavailable"));
 
@@ -97,6 +104,8 @@ class UserRegisteredEventPublisherTest {
         assertDoesNotThrow(() -> TransactionSynchronizationManager.getSynchronizations()
                 .forEach(TransactionSynchronization::afterCommit));
         verify(kafkaTemplate).send(eq("user.events"), anyString(), any(UserRegistered.class));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                output.getOut().contains("Could not submit UserRegistered event"));
     }
 
     @Test

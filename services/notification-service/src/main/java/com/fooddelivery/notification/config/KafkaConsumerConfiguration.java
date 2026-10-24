@@ -22,7 +22,8 @@ public class KafkaConsumerConfiguration {
     }
 
     private void logRecoveredRecord(ConsumerRecord<?, ?> record, Exception exception) {
-        log.error("Skipping Kafka record after retries: topic={}, partition={}, offset={}",
+        log.error("Kafka record recovered without a dead-letter topic; it will be acknowledged: "
+                        + "topic={}, partition={}, offset={}",
                 record.topic(), record.partition(), record.offset(), exception);
     }
 }
