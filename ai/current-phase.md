@@ -2,11 +2,11 @@
 
 ## 1. Project Status
 
-The repository contains implementations for the User, Delivery, and Notification services. The historical phase numbering is inconsistent across older project documents; the Phase 6 and Phase 7 labels below describe the security and reliability work reviewed here, not a claim that every historical phase is complete.
+The repository contains implementations for the User, Delivery, Notification, and Catalog services. The historical phase numbering is inconsistent across older project documents; the Phase 6 and Phase 7 labels below describe the security and reliability work reviewed here, not a claim that every historical phase is complete.
 
 Phase 6 security and Phase 7 reliability work are implemented in part. Focused tests have been reported as passing, but database-, Redis-, and Kafka-backed end-to-end verification remains incomplete. Neither phase is considered fully verified.
 
-The next feature is the Restaurant/Menu catalog service. This is the agreed next step in a proposed future sequence, not a reconstruction of historical phase numbering. No concrete repository blocker to beginning its implementation was identified during this documentation review.
+The Catalog Service implementation phase is complete. Its focused unit and MVC test run reported 40 tests passed with 0 failures, 0 errors, and 0 skipped. Runtime HTTP smoke testing and end-to-end database persistence verification remain pending; this status does not reconstruct historical phase numbering or claim full end-to-end verification.
 
 ## 2. Implemented Services and Capabilities
 
@@ -34,11 +34,21 @@ The next feature is the Restaurant/Menu catalog service. This is the agreed next
 - Retry/recovery handling is configured for consumer failures.
 - Email and SMS delivery are not implemented.
 
+### Catalog Service
+
+- An independent service under `services/catalog-service` manages restaurant creation, retrieval, paginated/sorted listing, updating, and activation, plus menu-item creation, retrieval, paginated listing, updating, availability, and soft deletion.
+- DTO validation and consistent API error handling are implemented.
+- It uses MySQL, JPA, and Flyway with an owned `catalog_db` schema, `ddl-auto=validate`, and externalized `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`.
+- Automated service unit and MVC-slice tests cover the catalog behavior; these tests do not exercise MySQL persistence.
+- Menu item prices use INR with decimal precision and non-negative validation. Restaurant activation means enabled in the catalog only, not accepting orders.
+- Restaurant list APIs include activation state; restaurant menu listing returns available, non-deleted items only and returns an empty page for an inactive restaurant. Direct menu item lookup returns non-deleted items, including unavailable items.
+- The service has no authentication or authorization. Write endpoints are for trusted local development only and must not be publicly exposed.
+
 ### Technology
 
 **Implemented in service code:** Java 25, Spring Boot 4, Maven wrappers, Spring MVC, Spring Data JPA, MySQL, Flyway, Redis, Apache Kafka, Spring Security, JWT, and Spring Boot Actuator in the User Service.
 
-**Planned, not implemented as integrated platform capabilities:** Restaurant/Menu, Cart, Order, Payment, API Gateway, notification-provider delivery, Docker/Kubernetes deployment, CI/CD, AWS deployment, and expanded observability such as Prometheus, Grafana, and OpenTelemetry.
+**Planned, not implemented as integrated platform capabilities:** Cart, Order, Payment, API Gateway, notification-provider delivery, Docker/Kubernetes deployment, CI/CD, AWS deployment, and expanded observability such as Prometheus, Grafana, and OpenTelemetry.
 
 ## 3. Phase 6 — Security Hardening
 
@@ -72,8 +82,20 @@ The following focused results were reported for the recent work. They are unit, 
 | User Service cache/event publisher | 8 passed | Focused configuration, cache error-handler, and event-publisher tests; mocks/configuration checks, not live Redis/Kafka. |
 | Delivery Service transaction callbacks | 4 passed | Mocked repository/Redis tests with manually invoked callbacks; not a real transaction or Redis integration test. |
 | Notification Service consumer/config/JSON | 7 passed | Unit/mock-based consumer, serialization, and error-handler tests; no broker-backed verification. |
+| Catalog Service unit/MVC | 40 passed | Focused service unit and MVC tests; no runtime HTTP or MySQL integration. |
 
-No Surefire report files were present in the repository during this documentation review. The counts above are recorded from prior focused test-run reports, not newly executed tests. No tests or services were run for this documentation update.
+Catalog Service focused test result: **40 tests passed, 0 failures, 0 errors, 0 skipped**. The reported run used automated unit and MVC tests and did not use MySQL, Redis, or Kafka. The other listed counts are focused results reported from earlier work.
+
+Catalog runtime verification remains pending:
+
+- Runtime application startup has not been successfully confirmed.
+- HTTP CRUD smoke tests have not been executed.
+- Persistence through actual HTTP requests has not been verified.
+- Persistence after an application restart has not been verified.
+- The database schema and Flyway history were inspected read-only; versions V1 and V2 were reported as successfully applied, with no pending migrations.
+- No smoke-test records were created.
+
+These checks are follow-up verification for the completed implementation phase; they do not establish that the service is fully end-to-end verified or production-ready.
 
 `JwtAuthenticationIntegrationTest` is database-backed and remains unrun because the intended test database and Redis DB have not been independently confirmed as dedicated and isolated. Its test setup deletes all user rows in its selected schema. The Maven test properties naming a test schema and Redis DB 15 do not alone establish resource ownership or safe isolation.
 
@@ -88,14 +110,16 @@ No Surefire report files were present in the repository during this documentatio
 7. **Unresolved:** Cache eviction failures can leave stale cached user data until expiration or another successful eviction.
 8. **Unresolved:** Notification event processing has no idempotency tracking, so duplicate delivery may repeat processing.
 9. **Unimplemented:** Delivery assignment, Cart, Order, Payment, API Gateway, and email/SMS provider workflows.
-10. **Unverified:** Local runtime startup and end-to-end behavior across all services are not established by the focused test results.
+10. **Pending verification:** Catalog runtime startup, HTTP CRUD behavior, HTTP-to-MySQL persistence, and restart persistence have not been verified. The schema and Flyway history were inspected read-only; V1 and V2 were reported applied with no pending migrations.
+11. **Security limitation:** Catalog write endpoints have no authentication or authorization and must not be publicly exposed.
+12. **Unverified:** Local runtime startup and end-to-end behavior across all services are not established by the focused test results.
 
 ## 7. Next Feature and Planned Roadmap
 
-The following is a **proposed future sequence**, not a claim about historical phase numbering:
+The Catalog Service implementation phase is complete and its focused unit/MVC test run reported 40 passing tests. Runtime smoke testing, actual database persistence verification, and authorization remain outstanding. Runtime smoke testing is a follow-up verification task, not a newly numbered phase. The following is a **proposed future sequence**, not a claim about historical phase numbering:
 
 1. **Local runtime and CI foundation, as needed** — Establish repeatable local development and safe automated checks before they are prerequisites for feature work.
-2. **Restaurant/Menu catalog service** — Add restaurant and menu capabilities as the next feature.
+2. **Catalog verification and authorization** — Establish isolated database verification; implement an approved access-control boundary before any public deployment.
 3. **Cart service** — Build cart workflows on catalog data.
 4. **Order lifecycle** — Define and implement order creation and state transitions using catalog/cart capabilities.
 5. **Payment service** — Add payment workflows with appropriate security and failure handling.
@@ -103,7 +127,7 @@ The following is a **proposed future sequence**, not a claim about historical ph
 7. **API Gateway and notification delivery integration** — Add gateway routing and connect notifications to delivery providers after event handling is designed.
 8. **Production delivery and operations** — Add Docker/Kubernetes, observability, CI/CD, and AWS deployment.
 
-The immediate next step is the Restaurant/Menu catalog service. This deliberately leaves the deferred Phase 6/7 verification and reliability gaps visible; it does not imply those gaps are resolved or that the services are production-ready.
+The immediate next step is to establish a safe catalog database integration strategy and agree on an authorization design before public exposure. This does not imply the deferred Phase 6/7 risks are resolved or that any service is production-ready.
 
 ## 8. Rules for Future Work
 
