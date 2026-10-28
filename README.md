@@ -1,6 +1,6 @@
 # Food Delivery Platform
 
-A Java microservices learning project for building food-delivery capabilities incrementally. The repository currently implements User, Delivery, Notification, and a Restaurant/Menu Catalog service. Cart, Order, Payment, and API Gateway capabilities are not implemented.
+A Java microservices learning project for building food-delivery capabilities incrementally. The repository currently implements User, Delivery, Notification, Restaurant/Menu Catalog, and Cart services. Order, Payment, and API Gateway capabilities are not implemented.
 
 ## Architecture and current status
 
@@ -8,6 +8,7 @@ A Java microservices learning project for building food-delivery capabilities in
 - **Delivery Service** manages delivery-partner records and availability in MySQL, and uses Redis sets and GEO operations for availability and location projections.
 - **Notification Service** consumes and validates user-registration events from Kafka and logs them. It does not deliver email or SMS.
 - **Catalog Service** manages restaurant details and activation plus menu items, availability, pagination, and soft deletion in its own MySQL schema.
+- **Cart Service** manages one cart per user, retrieves menu-item details from the Catalog Service over HTTP, and stores quantity and INR price snapshots in its own MySQL schema.
 
 The services are separate Spring Boot applications with independent Maven wrappers. See [`ai/architecture.md`](ai/architecture.md) for architecture notes and [`ai/current-phase.md`](ai/current-phase.md) for the authoritative current status, verification evidence, deferred risks, and proposed next feature.
 
@@ -38,6 +39,12 @@ The Catalog Service is an independent Spring Boot application at `services/catal
 
 The focused automated unit/MVC test run reported **40 tests passed, 0 failures, 0 errors, and 0 skipped**. Runtime application startup, HTTP smoke tests, HTTP-to-MySQL persistence, and persistence after restart remain pending; the service is not fully end-to-end verified or production-ready. It has no authentication or authorization and is intended only for trusted local development. Restaurant activation is a catalog flag and does not represent real-time order acceptance. Menu prices are currently denominated in INR.
 
+### Cart Service
+
+The Cart Service is an independent Spring Boot application at `services/cart-service`, configured for local port `8084` and its own MySQL schema, `cart_db`. It creates/retrieves a user's cart, adds and updates menu-item quantities, removes or clears lines, and returns a subtotal from persisted INR unit-price snapshots. On add, it retrieves the current menu-item details and price from the Catalog Service at the configured base URL; re-adding a line increments quantity and refreshes its item name and price snapshot. It does not own Catalog data.
+
+The focused Cart unit, MVC, and mocked-Catalog-HTTP test run passed **24 tests, 0 failures, 0 errors, and 0 skipped**. It used no live database or Catalog Service and does not verify Cart Service startup, Flyway migration application, or database persistence. User ID scoping is a local-development boundary only; there is no authentication or production authorization. See [the Cart Service README](services/cart-service/README.md) for endpoints and setup.
+
 ### Notification Service and Kafka events
 
 The User Service publishes `UserRegistered` events to `user.events`, keyed by event ID, after the registration transaction commits. The Notification Service consumes the event, validates its ID, user ID, and occurrence time, then logs it. Email/SMS delivery and consumer idempotency are not implemented.
@@ -50,7 +57,7 @@ Database commit and Kafka publication are not atomic. A process failure after co
 
 **Present in service code/configuration:** Java 25, Spring Boot 4, Maven, Spring MVC, Spring Data JPA, MySQL, Flyway, Redis, Apache Kafka, Spring Security, JWT, and Spring Boot Actuator in the User Service.
 
-**Planned, not integrated platform capabilities:** Cart, Order, Payment, API Gateway, email/SMS delivery, Docker/Kubernetes deployment, CI/CD, AWS deployment, Prometheus, Grafana, and OpenTelemetry.
+**Planned, not integrated platform capabilities:** Order, Payment, API Gateway, email/SMS delivery, Docker/Kubernetes deployment, CI/CD, AWS deployment, Prometheus, Grafana, and OpenTelemetry.
 
 ## Local service instructions
 
@@ -59,6 +66,7 @@ The commands below are already documented for this repository. The service confi
 - **User Service:** requires its configured MySQL datasource and Redis for cache operations; Kafka is needed for registration-event publication. Configuration keys include `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET_KEY`, and the optional Kafka override `KAFKA_BOOTSTRAP_SERVERS`. The application is configured for port `8081`.
 - **Delivery Service:** requires its configured MySQL datasource and Redis. Configuration keys include `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`. The application is configured for port `8082`.
 - **Catalog Service:** requires a dedicated MySQL schema named `catalog_db`. Configure `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`; Flyway manages the service tables and Hibernate validates them. The service is configured for port `8083`. Its Maven command is documented in [the Catalog Service README](services/catalog-service/README.md); runtime startup and port availability have not been verified.
+- **Cart Service:** requires a dedicated MySQL schema named `cart_db`, `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, and `CATALOG_SERVICE_BASE_URL` pointing to the Catalog Service. Flyway manages the service tables and Hibernate validates them. The service is configured for port `8084`; see [the Cart Service README](services/cart-service/README.md) for the startup command and API.
 - **Notification Service:** requires a reachable Kafka broker. Configuration keys include `KAFKA_BOOTSTRAP_SERVERS` and the optional `KAFKA_CONSUMER_GROUP_ID`. No HTTP port is documented here.
 
 Run the services from their respective directories in PowerShell:
@@ -91,8 +99,11 @@ The following focused results are recorded for recent work:
 | Delivery Service transaction callbacks | 4 passed | Mock-based tests that manually invoke transaction callbacks; not real MySQL/Redis transaction behavior. |
 | Notification Service consumer/config/JSON | 7 passed | Unit/mock-based consumer, serialization, and error-handler behavior; not broker-backed processing. |
 | Catalog Service unit/MVC | 40 passed | Focused service and MVC tests; no runtime HTTP or MySQL integration. |
+| Cart Service unit/MVC/Catalog client | 24 passed | Mockito service tests, MVC slice with a mocked service, and mocked Catalog HTTP; no live MySQL or Catalog Service. |
 
 Catalog result: **40 tests passed, 0 failures, 0 errors, 0 skipped** in the reported focused unit/MVC run. This focused run does not show that every service's full test suite passes or that external integrations work end-to-end. Runtime HTTP smoke testing and end-to-end database persistence verification are still pending.
+
+Cart result: **24 tests, 0 failures, 0 errors, 0 skipped**, from the focused command documented in [the Cart Service README](services/cart-service/README.md). These tests do not verify runtime startup, Flyway against MySQL, or actual persistence.
 
 `JwtAuthenticationIntegrationTest` is database-backed and has not been run because the test database and Redis isolation have not been independently verified. Its setup deletes user rows in the selected schema. Test-runner properties naming `food_delivery_user_test` and Redis logical DB 15 do not prove those resources are dedicated or safe to modify. Do not run cleanup-capable database/Redis tests until resource ownership and isolation are confirmed.
 
@@ -103,6 +114,7 @@ Additional verification gaps:
 - Delivery callback tests use mocks and manually invoked callbacks, not live MySQL and Redis.
 - Notification tests do not use a Kafka broker.
 - Catalog tests do not run Flyway against MySQL or verify database constraints and persistence.
+- Cart tests use mocks and an in-memory mock HTTP server; no database integration, live Catalog request, or runtime startup was performed.
 
 ## Known limitations and next steps
 
@@ -111,7 +123,8 @@ Additional verification gaps:
 - Registration database commits and Kafka publication are not atomic; there is no transactional outbox.
 - Kafka recovery has no durable DLQ or replay mechanism.
 - Database-backed authentication/deleted-user tests remain deferred pending verified test-resource isolation.
-- Delivery assignment, Cart, Order, Payment, API Gateway, and notification-provider workflows are not implemented.
+- Delivery assignment, Order, Payment, API Gateway, and notification-provider workflows are not implemented.
+- Cart Service implementation is complete, but runtime startup and MySQL persistence remain unverified; its `userId` ownership boundary is not authentication.
 - Catalog runtime smoke testing, actual HTTP-to-MySQL persistence, and restart persistence remain pending. The Catalog Service currently has no authorization and is not suitable for public exposure.
 - Docker/Kubernetes, CI/CD, AWS deployment, and expanded observability are planned rather than integrated.
 

@@ -15,13 +15,21 @@ No Redis, Kafka, or inter-service database access is used. Restaurant and menu w
 
 Create and grant access to a dedicated MySQL schema named `catalog_db` outside the service. The service does not create database users, schemas, grants, or credentials. Flyway creates the tables in that existing schema on startup.
 
-Provide these environment variables using a local secret mechanism:
+Provide these environment variables using a local secret mechanism. The application reads them through the Spring placeholders in `src/main/resources/application.properties`:
 
 | Variable | Purpose |
 |---|---|
 | `DB_URL` | JDBC URL pointing to the dedicated catalog schema, for example `jdbc:mysql://localhost:3306/catalog_db` |
 | `DB_USERNAME` | Database account with appropriate catalog-schema permissions |
-| `DB_PASSWORD` | Password for that account |
+| `DB_PASSWORD` | Password for that account; use a placeholder value in documentation only |
+
+Example:
+
+```powershell
+$env:DB_URL='jdbc:mysql://localhost:3306/catalog_db'
+$env:DB_USERNAME='catalog_app'
+$env:DB_PASSWORD='<replace-with-catalog-db-password>'
+```
 
 Hibernate uses `ddl-auto=validate`; Flyway is the schema source of truth. The service is configured for port `8083`, following the existing User Service (`8081`) and Delivery Service (`8082`) configuration. Runtime availability of the port has not been verified.
 
