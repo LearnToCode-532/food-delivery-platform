@@ -12,6 +12,8 @@ import com.fooddelivery.catalog.menu.repository.MenuItemRepository;
 import com.fooddelivery.catalog.menu.service.MenuItemService;
 import com.fooddelivery.catalog.restaurant.entity.Restaurant;
 import com.fooddelivery.catalog.restaurant.repository.RestaurantRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,7 @@ public class MenuItemServiceImpl implements MenuItemService {
     }
 
     @Override
+    @CacheEvict(value = "restaurant-menu-items", allEntries = true)
     public MenuItemResponse create(Long restaurantId, CreateMenuItemRequest request) {
         BigDecimal price = normalizePrice(request.getPrice());
         Restaurant restaurant = findRestaurant(restaurantId);
@@ -55,6 +58,8 @@ public class MenuItemServiceImpl implements MenuItemService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = "restaurant-menu-items",
+            key = "#restaurantId + ':' + #page + ':' + #size + ':' + #sortBy + ':' + #direction")
     public PageResponse<MenuItemResponse> listForRestaurant(
             Long restaurantId,
             int page,
@@ -73,11 +78,13 @@ public class MenuItemServiceImpl implements MenuItemService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = "menu-items", key = "#id")
     public MenuItemResponse getById(Long id) {
         return toResponse(findMenuItem(id));
     }
 
     @Override
+    @CacheEvict(value = {"menu-items", "restaurant-menu-items"}, allEntries = true)
     public MenuItemResponse update(Long id, UpdateMenuItemRequest request) {
         MenuItem item = findMenuItem(id);
         BigDecimal price = normalizePrice(request.getPrice());
@@ -88,6 +95,7 @@ public class MenuItemServiceImpl implements MenuItemService {
     }
 
     @Override
+    @CacheEvict(value = {"menu-items", "restaurant-menu-items"}, allEntries = true)
     public MenuItemResponse setAvailable(Long id, boolean available) {
         MenuItem item = findMenuItem(id);
         item.setAvailable(available);
@@ -95,6 +103,7 @@ public class MenuItemServiceImpl implements MenuItemService {
     }
 
     @Override
+    @CacheEvict(value = {"menu-items", "restaurant-menu-items"}, allEntries = true)
     public void softDelete(Long id) {
         MenuItem item = findMenuItem(id);
         item.setDeletedAt(Instant.now());

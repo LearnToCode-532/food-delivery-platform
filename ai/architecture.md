@@ -21,11 +21,11 @@ Currently implemented:
 - Cart Service (user cart data and price snapshots; independent deployable and owned database)
 - Delivery Service
 - Notification Service
+- Order Service (checkout snapshot persistence and post-commit `OrderCreated` event publication)
 
 Planned:
 
 - API Gateway
-- Order Service
 - Payment Service
 
 ## Data Ownership
@@ -40,7 +40,7 @@ Current implementation note: the Catalog Service is implemented as a single depl
 
 The Catalog Service is an independent Spring Boot application at `services/catalog-service`, configured for local port `8083`. It owns restaurant and menu-item catalog data in its MySQL `catalog_db` schema. Flyway migrations manage the schema, and Hibernate validates it.
 
-The service is independent of the User, Delivery, and Notification services and has no outbound integrations. The Cart Service consumes its menu-item API over HTTP. Redis and Kafka are not part of the Catalog Service implementation. Authentication and authorization are not implemented; it is intended for trusted local development only and must not be exposed publicly until appropriate access control is in place.
+The service is independent of the User, Delivery, and Notification services and has no outbound integrations. The Cart Service consumes its menu-item API over HTTP. The Catalog Service does use Redis for cache-aside reads of restaurant and menu-item details and restaurant menu lists, while MySQL remains the source of truth. Cache names are `restaurants`, `menu-items`, and `restaurant-menu-items`, with a default 10-minute TTL. Restaurant updates and activation changes evict the restaurant and restaurant-menu cache entries; menu-item updates, availability changes, and soft deletes evict the menu-item and restaurant-menu cache entries. Redis failures are handled by the Catalog cache error handler, which logs the failure and allows the database-backed read path to continue. Authentication and authorization are not implemented; it is intended for trusted local development only and must not be exposed publicly until appropriate access control is in place.
 
 ## Cart Service
 
@@ -53,9 +53,15 @@ When a menu item is added, Cart Service calls the Catalog Service over HTTP usin
 ## Redis
 
 Redis is used for:
-- Caching
-- GEO location
+- Caching (User Service and Catalog Service)
+- GEO location (Delivery Service)
 - Temporary state
+
+Cache conventions in the active implementation:
+- User Service and Catalog Service use Spring's cache abstraction with a default 10-minute TTL.
+- Cache keys are simple lookup keys such as user ID or restaurant/menu-item ID and restaurant menu composite keys.
+- Redis serialization uses `GenericJacksonJsonRedisSerializer` with unsafe default typing enabled for compatibility with cached domain-response objects.
+- Cache error handlers log Redis failures and allow the underlying database-backed read path to continue rather than failing the request.
 
 ## Kafka
 
@@ -68,8 +74,10 @@ Kafka is used for:
 
 Initial event flow:
 - The User Service publishes a `UserRegistered` event to `user.events` after the user database transaction commits.
-- The Notification Service consumes `user.events` independently and does not access the User Service database.
-- The event contract contains only `eventId`, `userId`, and `occurredAt`.
+- The Order Service publishes an `OrderCreated` event to `order.events` after the order database transaction commits.
+- The Notification Service consumes both topics independently and does not access the upstream service databases.
+- The User event contract contains only `eventId`, `userId`, and `occurredAt`.
+- The Order event contract contains only `eventId`, `orderId`, `userId`, and `occurredAt`.
 - The initial producer is asynchronous and does not use a transactional outbox; database commit and Kafka publication are not atomic.
 
 ## Security

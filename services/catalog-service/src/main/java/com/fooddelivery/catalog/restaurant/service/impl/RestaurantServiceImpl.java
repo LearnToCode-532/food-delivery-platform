@@ -9,6 +9,8 @@ import com.fooddelivery.catalog.restaurant.dto.UpdateRestaurantRequest;
 import com.fooddelivery.catalog.restaurant.entity.Restaurant;
 import com.fooddelivery.catalog.restaurant.repository.RestaurantRepository;
 import com.fooddelivery.catalog.restaurant.service.RestaurantService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,7 @@ public class RestaurantServiceImpl implements RestaurantService {
     }
 
     @Override
+    @CacheEvict(value = {"restaurants", "restaurant-menu-items"}, allEntries = true)
     public RestaurantResponse create(CreateRestaurantRequest request) {
         Restaurant restaurant = Restaurant.builder()
                 .name(requiredText(request.getName()))
@@ -41,6 +44,7 @@ public class RestaurantServiceImpl implements RestaurantService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = "restaurants", key = "#id")
     public RestaurantResponse getById(Long id) {
         return toResponse(findRestaurant(id));
     }
@@ -54,6 +58,7 @@ public class RestaurantServiceImpl implements RestaurantService {
     }
 
     @Override
+    @CacheEvict(value = {"restaurants", "restaurant-menu-items"}, allEntries = true)
     public RestaurantResponse update(Long id, UpdateRestaurantRequest request) {
         Restaurant restaurant = findRestaurant(id);
         restaurant.setName(requiredText(request.getName()));
@@ -64,6 +69,7 @@ public class RestaurantServiceImpl implements RestaurantService {
     }
 
     @Override
+    @CacheEvict(value = {"restaurants", "restaurant-menu-items"}, allEntries = true)
     public RestaurantResponse setActive(Long id, boolean active) {
         Restaurant restaurant = findRestaurant(id);
         restaurant.setActive(active);

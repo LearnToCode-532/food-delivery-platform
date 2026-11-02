@@ -1,14 +1,15 @@
 # Food Delivery Platform
 
-A Java microservices learning project for building food-delivery capabilities incrementally. The repository currently implements User, Delivery, Notification, Restaurant/Menu Catalog, and Cart services. Order, Payment, and API Gateway capabilities are not implemented.
+A Java microservices learning project for building food-delivery capabilities incrementally. The repository currently implements User, Delivery, Notification, Restaurant/Menu Catalog, Cart, and Order services. Payment and API Gateway capabilities are not implemented.
 
 ## Architecture and current status
 
 - **User Service** manages user registration, login, profiles, and JWT-protected user operations. It persists users in MySQL, uses Redis for caching, and publishes registration events to Kafka after the database transaction commits.
 - **Delivery Service** manages delivery-partner records and availability in MySQL, and uses Redis sets and GEO operations for availability and location projections.
-- **Notification Service** consumes and validates user-registration events from Kafka and logs them. It does not deliver email or SMS.
-- **Catalog Service** manages restaurant details and activation plus menu items, availability, pagination, and soft deletion in its own MySQL schema.
+- **Notification Service** consumes and validates user-registration and order-created events from Kafka and logs them. It does not deliver email or SMS.
+- **Catalog Service** manages restaurant details and activation plus menu items, availability, pagination, and soft deletion in its own MySQL schema. It also uses Redis for cache-aside reads of restaurant detail, menu-item detail, and restaurant menu lists with a 10-minute TTL and invalidation on write operations.
 - **Cart Service** manages one cart per user, retrieves menu-item details from the Catalog Service over HTTP, and stores quantity and INR price snapshots in its own MySQL schema.
+- **Order Service** persists order snapshots from a user cart and publishes `OrderCreated` events after the order transaction commits.
 
 The services are separate Spring Boot applications with independent Maven wrappers. See [`ai/architecture.md`](ai/architecture.md) for architecture notes and [`ai/current-phase.md`](ai/current-phase.md) for the authoritative current status, verification evidence, deferred risks, and proposed next feature.
 
@@ -35,9 +36,9 @@ Delivery assignment and order workflows are not implemented.
 
 ### Catalog Service
 
-The Catalog Service is an independent Spring Boot application at `services/catalog-service`, configured for local port `8083` and its own MySQL schema, `catalog_db`. It manages restaurant creation, retrieval, paginated/sorted listing, updating, and activation, as well as menu-item creation, retrieval, listing, updating, availability, and soft deletion. DTO validation and consistent API errors are implemented. Flyway manages the schema and Hibernate validates it.
+The Catalog Service is an independent Spring Boot application at `services/catalog-service`, configured for local port `8083` and its own MySQL schema, `catalog_db`. It manages restaurant creation, retrieval, paginated/sorted listing, updating, and activation, as well as menu-item creation, retrieval, listing, updating, availability, and soft deletion. DTO validation and consistent API errors are implemented. Flyway manages the schema and Hibernate validates it. Redis cache-aside support is enabled for restaurant lookup by ID, menu-item lookup by ID, and restaurant menu listing; cache names are `restaurants`, `menu-items`, and `restaurant-menu-items`, with a default 10-minute TTL and invalidation on update/activation/deletion flows.
 
-The focused automated unit/MVC test run reported **40 tests passed, 0 failures, 0 errors, and 0 skipped**. Runtime application startup, HTTP smoke tests, HTTP-to-MySQL persistence, and persistence after restart remain pending; the service is not fully end-to-end verified or production-ready. It has no authentication or authorization and is intended only for trusted local development. Restaurant activation is a catalog flag and does not represent real-time order acceptance. Menu prices are currently denominated in INR.
+The focused Catalog cache-behavior and full CatalogService test suite passed **47 tests, 0 failures, 0 errors, and 0 skipped**. Runtime live-Redis smoke testing remains optional and was not performed in this environment; the service is not fully end-to-end verified against a running Redis/Mysql deployment. It has no authentication or authorization and is intended only for trusted local development. Restaurant activation is a catalog flag and does not represent real-time order acceptance. Menu prices are currently denominated in INR.
 
 ### Cart Service
 
@@ -47,17 +48,17 @@ The focused Cart unit, MVC, and mocked-Catalog-HTTP test run passed **24 tests, 
 
 ### Notification Service and Kafka events
 
-The User Service publishes `UserRegistered` events to `user.events`, keyed by event ID, after the registration transaction commits. The Notification Service consumes the event, validates its ID, user ID, and occurrence time, then logs it. Email/SMS delivery and consumer idempotency are not implemented.
+The User Service publishes `UserRegistered` events to `user.events`, keyed by event ID, after the registration transaction commits. The Order Service publishes `OrderCreated` events to `order.events`, keyed by event ID, after the order transaction commits. The Notification Service consumes both event types, validates their required fields, and logs them. Email/SMS delivery and consumer idempotency are not implemented.
 
 The Notification Service uses two retries at one-second intervals after the initial delivery for retryable processing failures (three attempts total). Recovered records are logged by topic, partition, and offset, then acknowledged. Fatal deserialization failures are recovered without retries under Spring Kafka's default classification. There is no dead-letter queue (DLQ), durable replay mechanism, or consumer idempotency tracking.
 
-Database commit and Kafka publication are not atomic. A process failure after commit can leave a user registration without a corresponding event; there is no transactional outbox.
+Database commit and Kafka publication are not atomic. A process failure after commit can leave a user registration or order without a corresponding event; there is no transactional outbox.
 
 ## Technology stack
 
 **Present in service code/configuration:** Java 25, Spring Boot 4, Maven, Spring MVC, Spring Data JPA, MySQL, Flyway, Redis, Apache Kafka, Spring Security, JWT, and Spring Boot Actuator in the User Service.
 
-**Planned, not integrated platform capabilities:** Order, Payment, API Gateway, email/SMS delivery, Docker/Kubernetes deployment, CI/CD, AWS deployment, Prometheus, Grafana, and OpenTelemetry.
+**Planned, not integrated platform capabilities:** Payment, API Gateway, email/SMS delivery, Docker/Kubernetes deployment, CI/CD, AWS deployment, Prometheus, Grafana, and OpenTelemetry.
 
 ## Local service instructions
 

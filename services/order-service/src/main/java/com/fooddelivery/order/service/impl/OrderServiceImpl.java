@@ -8,6 +8,7 @@ import com.fooddelivery.order.dto.OrderResponse;
 import com.fooddelivery.order.entity.Order;
 import com.fooddelivery.order.entity.OrderItem;
 import com.fooddelivery.order.entity.OrderStatus;
+import com.fooddelivery.order.event.OrderCreatedEventPublisher;
 import com.fooddelivery.order.exception.EmptyCartException;
 import com.fooddelivery.order.repository.OrderRepository;
 import com.fooddelivery.order.service.OrderService;
@@ -25,10 +26,13 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final CartClient cartClient;
+    private final OrderCreatedEventPublisher orderCreatedEventPublisher;
 
-    public OrderServiceImpl(OrderRepository orderRepository, CartClient cartClient) {
+    public OrderServiceImpl(OrderRepository orderRepository, CartClient cartClient,
+                           OrderCreatedEventPublisher orderCreatedEventPublisher) {
         this.orderRepository = orderRepository;
         this.cartClient = cartClient;
+        this.orderCreatedEventPublisher = orderCreatedEventPublisher;
     }
 
     @Override
@@ -56,6 +60,9 @@ public class OrderServiceImpl implements OrderService {
                 .forEach(item -> order.addItem(toOrderItem(item, cart.currency())));
 
         Order saved = orderRepository.save(order);
+        if (orderCreatedEventPublisher != null) {
+            orderCreatedEventPublisher.publishAfterCommit(saved.getId(), saved.getUserId());
+        }
         return toResponse(saved);
     }
 

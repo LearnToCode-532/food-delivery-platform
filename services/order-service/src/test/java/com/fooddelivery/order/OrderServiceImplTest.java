@@ -6,6 +6,7 @@ import com.fooddelivery.order.client.CartResponse;
 import com.fooddelivery.order.dto.OrderResponse;
 import com.fooddelivery.order.entity.Order;
 import com.fooddelivery.order.entity.OrderItem;
+import com.fooddelivery.order.event.OrderCreatedEventPublisher;
 import com.fooddelivery.order.exception.CartNotFoundException;
 import com.fooddelivery.order.exception.EmptyCartException;
 import com.fooddelivery.order.repository.OrderRepository;
@@ -35,6 +36,9 @@ class OrderServiceImplTest {
 
     @Mock
     private OrderRepository orderRepository;
+
+    @Mock
+    private OrderCreatedEventPublisher orderCreatedEventPublisher;
 
     @InjectMocks
     private OrderServiceImpl orderService;

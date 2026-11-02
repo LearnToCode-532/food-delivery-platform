@@ -2,11 +2,11 @@
 
 ## 1. Project Status
 
-The repository contains implementations for the User, Delivery, Notification, Catalog, and Cart services. The historical phase numbering is inconsistent across older project documents; the Phase 6 and Phase 7 labels below describe the security and reliability work reviewed here, not a claim that every historical phase is complete.
+The repository contains implementations for the User, Delivery, Notification, Catalog, Cart, and Order services. The historical phase numbering is inconsistent across older project documents; the Phase 6 and Phase 7 labels below describe the security and reliability work reviewed here, not a claim that every historical phase is complete.
 
 Phase 6 security and Phase 7 reliability work are implemented in part. Focused tests have been reported as passing, but database-, Redis-, and Kafka-backed end-to-end verification remains incomplete. Neither phase is considered fully verified.
 
-The Catalog Service implementation phase is complete. Its focused unit and MVC test run reported 40 tests passed with 0 failures, 0 errors, and 0 skipped. Runtime HTTP smoke testing and end-to-end database persistence verification remain pending; this status does not reconstruct historical phase numbering or claim full end-to-end verification.
+The Catalog Service implementation phase is complete. Its focused Redis cache validation is also complete in the current workspace: the isolated cache-behavior tests passed (6 tests, 0 failures, 0 errors, 0 skipped), and the full Catalog Service test suite passed (47 tests, 0 failures, 0 errors, 0 skipped). Runtime live-Redis smoke testing remains optional and was not required for this verification because no Redis instance was asserted as available in the current environment. This status does not reconstruct historical phase numbering or claim full end-to-end database and infrastructure verification.
 
 The Cart Service implementation is complete, with 24 focused unit, MVC, and mocked Catalog HTTP tests passing (0 failures, 0 errors, 0 skipped). Runtime startup, Flyway application to MySQL, live Catalog connectivity, and actual database persistence have not been verified. The Cart user-ID boundary is not authentication or production authorization.
 
@@ -36,12 +36,21 @@ The Cart Service implementation is complete, with 24 focused unit, MVC, and mock
 - Retry/recovery handling is configured for consumer failures.
 - Email and SMS delivery are not implemented.
 
+### Order Service
+
+- Persists orders from a cart snapshot and stores user, cart, currency, status, subtotal, and per-item snapshot data in MySQL.
+- Publishes `OrderCreated` events to `order.events` after the order transaction commits.
+- The event contract currently contains `eventId`, `orderId`, `userId`, and `occurredAt`.
+- Checkout-to-Kafka publication is asynchronous and not atomic with the order commit; no outbox is implemented.
+
 ### Catalog Service
 
 - An independent service under `services/catalog-service` manages restaurant creation, retrieval, paginated/sorted listing, updating, and activation, plus menu-item creation, retrieval, paginated listing, updating, availability, and soft deletion.
 - DTO validation and consistent API error handling are implemented.
 - It uses MySQL, JPA, and Flyway with an owned `catalog_db` schema, `ddl-auto=validate`, and externalized `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`.
-- Automated service unit and MVC-slice tests cover the catalog behavior; these tests do not exercise MySQL persistence.
+- Redis cache-aside support is active for restaurant detail lookup by ID, menu-item detail lookup by ID, and restaurant menu listing. Cache names are `restaurants`, `menu-items`, and `restaurant-menu-items`; the default TTL is 10 minutes.
+- Restaurant updates and activation changes evict the restaurant detail and restaurant-menu caches. Menu-item updates, availability toggles, and soft deletions evict the menu-item and restaurant-menu caches. MySQL remains the source of truth.
+- Automated service unit and MVC-slice tests cover the catalog behavior, and the focused cache-behavior tests validate cache hit/miss, population, invalidation, and stale-entry avoidance.
 - Menu item prices use INR with decimal precision and non-negative validation. Restaurant activation means enabled in the catalog only, not accepting orders.
 - Restaurant list APIs include activation state; restaurant menu listing returns available, non-deleted items only and returns an empty page for an inactive restaurant. Direct menu item lookup returns non-deleted items, including unavailable items.
 - The service has no authentication or authorization. Write endpoints are for trusted local development only and must not be publicly exposed.
